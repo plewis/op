@@ -3,10 +3,11 @@
 #include <iostream>
 #include <numeric>
 
-#include "tree_summary.hpp"
 #include "opvertex.hpp"
+#include "tree_summary.hpp"
 #include <boost/format.hpp>
 #include <boost/program_options.hpp>
+#include <boost/exception/all.hpp> // Include for boost::exception
 
 using namespace std;
 using namespace boost;
@@ -46,6 +47,7 @@ class OP {
         static void opEdmondsKarp(
             vector<OPVertex> & avect,
             vector<OPVertex> & bvect,
+            edgemap_t & edgemap,
             Split::treeid_t & C1,
             Split::treeid_t & C2,
             Split::treeid_t & D1,
@@ -59,17 +61,23 @@ class OP {
             vector<Split::treeid_pair_t> & ABpairs) const;
 
         bool                    _quiet;
+        bool                    _output_for_gtp;
+        unsigned                _precision;
         string                  _tree_file_name;
         string                  _distance_measure;
         TreeSummary::SharedPtr  _tree_summary;
 
         static string           _program_name;
-        static unsigned        _major_version;
-        static unsigned        _minor_version;
+        static unsigned         _major_version;
+        static unsigned         _minor_version;
+
+#if defined(OP_SAVE_DOT_FILE)
+    static unsigned            _graph_number;
+#endif
 
     };
 
-inline OP::OP() : _quiet(true) {
+inline OP::OP() : _quiet(true), _output_for_gtp(false), _precision(9) {
     //cout << "Constructing a SStrom" << endl;
     clear();
 }
@@ -78,9 +86,11 @@ inline OP::~OP() = default;
 
 inline void OP::clear() {
     _quiet = true;
+    _output_for_gtp = false;
     _tree_file_name = "";
     _distance_measure = "geodesic";
     _tree_summary   = nullptr;
+    _precision = 9;
 }
 
 inline void OP::processCommandLineOptions(int argc, const char * argv[]) {
@@ -91,6 +101,8 @@ inline void OP::processCommandLineOptions(int argc, const char * argv[]) {
         ("version,v", "show program version")
         ("treefile,t",  program_options::value(&_tree_file_name)->required(), "name of data file in NEXUS format (required, no default)")
         ("dist", program_options::value(&_distance_measure), "specify either kf or geodesic (default: geodesic)")
+        ("precision", program_options::value(&_precision)->default_value(9), "number of digits precision to use in outputting distances (default: 9)")
+        ("gtptest", program_options::value(&_output_for_gtp)->default_value(false), "output treefile that can be read by Owens-Provan GTP program")
         ("quiet,q", program_options::value(&_quiet), "suppress all output except for errors (default: yes)")
         ;
     program_options::store(program_options::parse_command_line(argc, argv, desc), vm);
@@ -99,7 +111,7 @@ inline void OP::processCommandLineOptions(int argc, const char * argv[]) {
         program_options::store(parsed, vm);
     }
     catch(program_options::reading_file &) {
-        cout << "Note: configuration file (kfdist.conf) not found" << endl;
+        cout << "Note: configuration file (op.conf) not found" << endl;
     }
     program_options::notify(vm);
 
@@ -128,12 +140,12 @@ inline double OP::opCalcLeafContribution(const Split::treeid_t & Alvs, const Spl
     if (!_quiet) {
         cout << "Leaves from starting tree:" << endl;
         for (auto & a : Alvs) {
-            cout << "  " << a.createPatternRepresentation() << endl;
+            cout << "  " << a.createPatternRepresentation(true) << endl;
         }
 
         cout << "Leaves from ending tree:" << endl;
         for (auto & b : Blvs) {
-            cout << "  " << b.createPatternRepresentation() << endl;
+            cout << "  " << b.createPatternRepresentation(true) << endl;
         }
     }
 
@@ -153,11 +165,13 @@ inline double OP::opCalcLeafContribution(const Split::treeid_t & Alvs, const Spl
 }
 
 inline double OP::opFindCommonEdges(const Split::treeid_t & A, const Split::treeid_t & B, vector<Split> & common_edges) const {
+    // Find splits in the intersection of A and B
     set_intersection(
         A.begin(), A.end(),
         B.begin(), B.end(),
         back_inserter(common_edges)
     );
+
     double common_edge_contribution_squared = 0.0;
     for (auto & s : common_edges) {
         auto itA = find(A.begin(), A.end(), s);
@@ -165,6 +179,42 @@ inline double OP::opFindCommonEdges(const Split::treeid_t & A, const Split::tree
         auto itB = find(B.begin(), B.end(), s);
         double edgeB = itB->getEdgeLen();
         common_edge_contribution_squared += pow(edgeA-edgeB, 2);
+    }
+
+    // Count the number of splits in B compatible with each split in A (and vice versa)
+    map<const Split *, unsigned> acompatibilities;
+    map<const Split *, unsigned> bcompatibilities;
+    for (auto & a : A) {
+        for (auto & b : B) {
+            if (a.compatibleWith(b)) {
+                acompatibilities[&a]++;
+                bcompatibilities[&b]++;
+            }
+        }
+    }
+
+    // Add splits in A that are compatible with all splits in B to common_edges
+    for (auto & apair : acompatibilities) {
+        if (apair.second == B.size()) {
+            // This split is compatible with every split in the other tree, so add it to the vector
+            // of common edges if it is not already in the vector of common edges
+            if (find(common_edges.begin(), common_edges.end(), *apair.first) == common_edges.end()) {
+                common_edges.push_back(*apair.first);
+                common_edge_contribution_squared += pow(apair.first->getEdgeLen(), 2);
+            }
+        }
+    }
+
+    // Add splits in B that are compatible with all splits in A to common_edges
+    for (auto & bpair : bcompatibilities) {
+        if (bpair.second == A.size()) {
+            // This split is compatible with every split in the other tree, so add it to the vector
+            // of common edges if it is not already in the vector of common edges
+            if (find(common_edges.begin(), common_edges.end(), *bpair.first) == common_edges.end()) {
+                common_edges.push_back(*bpair.first);
+                common_edge_contribution_squared += pow(bpair.first->getEdgeLen(), 2);
+            }
+        }
     }
 
     if (!_quiet) {
@@ -180,17 +230,21 @@ inline double OP::opFindCommonEdges(const Split::treeid_t & A, const Split::tree
 inline void OP::opSplitAtCommonEdges(const vector<Split> & common_edges, vector<pair<Split::treeid_t,Split::treeid_t> > & in_pairs) const {
     vector<pair<Split::treeid_t,Split::treeid_t> > out_pairs;
     for (auto & common : common_edges) {
-        //cout << "\ncommon: " << common.createPatternRepresentation() << endl;
+        //temporary!
+        cout << "\ncommon: " << common.createPatternRepresentation() << endl;
 
         // Create a mask that can be used to zero out all bits in common except the first
         Split mask = common;
         mask.invertBits();
         unsigned first_common_bit = common.findFirstSetBit();
         mask.setBitAt(first_common_bit);
-        //cout << "  mask: " << mask.createPatternRepresentation() << endl;
+
+        //temporary!
+        cout << "  mask: " << mask.createPatternRepresentation() << endl;
 
         for (auto & inpair : in_pairs) {
-            //cout << "\n***** new tree pair *****" << endl;
+            //temporary!
+            cout << "\n***** new tree pair *****" << endl;
             // Separate out splits in starting (a_splits) vs. ending (b_splits) (sub)trees
             Split::treeid_t & a_splits = inpair.first;
             Split::treeid_t & b_splits = inpair.second;
@@ -200,46 +254,52 @@ inline void OP::opSplitAtCommonEdges(const vector<Split> & common_edges, vector<
             Split::treeid_t a_other_splits, b_other_splits;
 
             // Divvy up a_splits to a_common_splits and a_other_splits
-            //cout << "  Divvying up a_splits:" << endl;
+            //temporary!
+            cout << "  Divvying up a_splits:" << endl;
             for (auto & asplit : a_splits) {
-                //cout << "    asplit: " << asplit.createPatternRepresentation();
+                //temporary!
+                cout << "    asplit: " << asplit.createPatternRepresentation();
                 bool is_common = (asplit == common);
                 if (is_common) {
-                    //cout << " (common)" << endl;
+                    //temporary!
+                    cout << " (common)" << endl;
                 }
                 else {
                     if (asplit.subsumedIn(common)) {
-                        //cout << " (subsumed in common)" << endl;
+                        //temporary!
+                        cout << " (subsumed in common)" << endl;
                         a_common_splits.insert(asplit);
                     }
                     else {
-                        //cout << " (other)" << endl;
+                        //temporary!
+                        cout << " (other)" << endl;
                         Split masked = asplit;
                         masked.bitwiseAnd(mask);
-                        //cout << "    masked: " << masked.createPatternRepresentation() << endl;
+                        //temporary!
+                        cout << "    masked: " << masked.createPatternRepresentation() << endl;
                         a_other_splits.insert(masked);
                     }
                 }
             }
 
             // Divvy up b_splits to b_common_splits and b_other_splits
-            //cout << "  Divvying up b_splits:" << endl;
+            // cout << "  Divvying up b_splits:" << endl;
             for (auto & bsplit : b_splits) {
-                //cout << "  bsplit: " << bsplit.createPatternRepresentation();
+                // cout << "  bsplit: " << bsplit.createPatternRepresentation();
                 bool is_common = (bsplit == common);
                 if (is_common) {
-                    //cout << " (common)" << endl;
+                    // cout << " (common)" << endl;
                 }
                 else {
                     if (bsplit.subsumedIn(common)) {
-                        //cout << " (subsumed in common)" << endl;
+                        // cout << " (subsumed in common)" << endl;
                         b_common_splits.insert(bsplit);
                     }
                     else {
-                        //cout << " (other)" << endl;
+                        // cout << " (other)" << endl;
                         Split masked = bsplit;
                         masked.bitwiseAnd(mask);
-                        //cout << "  masked: " << masked.createPatternRepresentation() << endl;
+                        // cout << "  masked: " << masked.createPatternRepresentation() << endl;
                         b_other_splits.insert(masked);
                     }
                 }
@@ -283,7 +343,7 @@ inline void OP::opSaveIncompatibilityGraph(vector<OPVertex> & avect, vector<OPVe
 
     // Save all the entities needed
     // tuple key: <0> name, <1>capacity, <2>edgelen, <3>split, <4>shape, <5>color
-    typedef vector<tuple<string, string, string, string, string, string> > gnode_t;
+    typedef vector<std::tuple<string, string, string, string, string, string> > gnode_t;
     gnode_t anodes, bnodes;
     for (unsigned i = 0; i < avect.size(); i++) {
         string name     = str(format("a%d") % (i+1));
@@ -305,7 +365,25 @@ inline void OP::opSaveIncompatibilityGraph(vector<OPVertex> & avect, vector<OPVe
         bnodes.emplace_back(name, capacity, edgelen, split, shape, color);
     }
 
-    ofstream dotf("graph.dot");
+    if (OP::_graph_number == 1) {
+        // Create a rundot.sh file containing commands to compile all the incompatibility graphs
+        ofstream shf("rundot.sh");
+        shf << "#!/bin/bash\n\n";
+        shf << "# This file requires previous installation of dot and is intended\n";
+        shf << "# to be run on a Mac (because of the use of the open command)\n\n";
+        shf << "dot -Tpng graph-1.dot > graph-1.png; open graph-1.png\n";
+        shf.close();
+    }
+    else {
+        ofstream shf("rundot.sh", ios::out | ios::app);
+        shf << str(format("dot -Tpng graph-%d.dot > graph-%d.png; open graph-%d.png\n")
+            % OP::_graph_number
+            % OP::_graph_number
+            % OP::_graph_number);
+        shf.close();
+    }
+
+    ofstream dotf(str(format("graph-%d.dot") % OP::_graph_number++));
 
     dotf << "digraph G {\n";
     dotf << "\trankdir=LR;\n\n";
@@ -376,6 +454,7 @@ inline void OP::opSaveIncompatibilityGraph(vector<OPVertex> & avect, vector<OPVe
 inline void OP::opEdmondsKarp(
         vector<OPVertex> & avect,
         vector<OPVertex> & bvect,
+        edgemap_t & edgemap,
         Split::treeid_t & C1,
         Split::treeid_t & C2,
         Split::treeid_t & D1,
@@ -393,17 +472,16 @@ inline void OP::opEdmondsKarp(
 
     }
 
-    double max_flow = 0.0;
     bool done = false;
     while (!done) {
         vector<OPVertex *> route;
 
         // Make sure none of the "b" vertices are marked as visited
         for (auto & b : bvect) {
-            b._visited = false;
+            b._parent_index = -1;
         }
 
-        // Add all avect vertices to the route if they have residual capacity > 0
+        // Add all avect vertices to the route if they have capacity > 0
         for (auto & a : avect) {
             if (a._capacity > 0.0) {
                 route.push_back(&a);
@@ -416,15 +494,23 @@ inline void OP::opEdmondsKarp(
         for (unsigned aindex = 0; aindex < route_size; aindex++) {
             OPVertex * a = route[aindex];
             for (auto & b : a->_children) {
-                if (b->_capacity > 0.0 && !b->_visited) {
-                    b->_visited = true;
+                if (b->_capacity > 0.0 && b->_parent_index == -1) {
                     b->_parent_index = static_cast<int>(aindex);
                     route.push_back(b);
+                }
+                else if (b->_parent_index == -1) {
+                    // B is accessible but has outgoing capacity zero; see if any viable route exists to the left
+                    // Check to see if this ever happens; if it does happen, more coding needs to happen
+                    for (unsigned ai = 0; ai < route_size; ai++) {
+                        if (route[ai]->_capacity == 0.0 && edgemap.at(make_pair(route[ai], b)) > 0.0) {
+                            throw Xop("error: need to handle reverse flow in Edmonds-Karp algorithm");
+                        }
+                    }
                 }
             }
         }
 
-        // Find "b" vertex that first reaches the sink
+        // Find B vertex that first reaches the sink
         OPVertex * last = nullptr;
         for (auto & r : route) {
             if (r->_parent_index > -1) {
@@ -437,12 +523,16 @@ inline void OP::opEdmondsKarp(
             // If we did not reach the sink, we're done
             done = true;
         else {
+            // Identify the route
+            auto avertex = route[last->_parent_index];
+            auto bvertex = last;
+            auto abpair = make_pair(avertex, bvertex);
+
             // Find minimum capacity along the route
             double min_capacity = last->_capacity;
             if (route[last->_parent_index]->_capacity < min_capacity) {
                 min_capacity = route[last->_parent_index]->_capacity;
             }
-            max_flow += min_capacity;
 
             if (!quiet) {
                 cout << "\nRoute (asterisks show path obtained by following parents from sink to source):" << endl;
@@ -455,15 +545,19 @@ inline void OP::opEdmondsKarp(
                 cout << "  Min capacity along route: " << min_capacity << endl;
             }
 
-            // Reduce capacities along the route by an amount min_capacity
-            last->_capacity -= min_capacity;
-            if (fabs(last->_capacity) < 1e-10) {
-                last->_capacity = 0.0;
+            // Reduce capacity of the leftmost edge on the route by an amount min_capacity
+            avertex->_capacity -= min_capacity;
+            if (fabs(avertex->_capacity) < 1e-10) {
+                avertex->_capacity = 0.0;
             }
 
-            route[last->_parent_index]->_capacity -= min_capacity;
-            if (fabs(route[last->_parent_index]->_capacity) < 1e-10) {
-                route[last->_parent_index]->_capacity = 0.0;
+            // Increase the flow on the focal edge by min_capacity
+            edgemap.at(abpair) += min_capacity;
+
+            // Reduce capacity of the rightmost edge on the route by an amount min_capacity
+            bvertex->_capacity -= min_capacity;
+            if (fabs(bvertex->_capacity) < 1e-10) {
+                bvertex->_capacity = 0.0;
             }
 
 #if defined(OP_SAVE_DOT_FILE)
@@ -475,44 +569,37 @@ inline void OP::opEdmondsKarp(
         }
     }
 
-    // Identify C1, C2
+    // Identify C1, C2, D1, and D2
+    // C1 and D2 compose the min weight vertex cover
+    // C2 and D` compose the independent set
     for (auto & a : avect) {
         if (a._capacity > 0.0) {
+            // Because this A-vertex has residual capacity, it is part of the independent set
             C2.insert(*(a._split));
+
+            // This A vertex allows access to the B side, so any connected B vertices with
+            // zero capacity are part of the vertex cover
+            for (const auto b : a._children) {
+                if (b->_capacity == 0.0) {
+                    D2.insert(*(b->_split));
+                }
+            }
         }
         else {
+            // Because this A-vertex has zero capacity, it is part of the vertex cover
             C1.insert(*(a._split));
+
+            // No need to consider connected B vertices because this A-vertex already
+            // covers all connected edges
         }
     }
 
-    // Identify D1, D2
+    // D1 includes every split not in D2
+    D1.clear();
     for (auto & b : bvect) {
-        if (b._capacity > 0.0) {
+        if (D2.count(*(b._split)) == 0) {
             D1.insert(*(b._split));
         }
-        else {
-            D2.insert(*(b._split));
-        }
-    }
-
-    if (!quiet) {
-        double C1len = opCalcTreeIDLength(C1);
-        double C2len = opCalcTreeIDLength(C2);
-        double D1len = opCalcTreeIDLength(D1);
-        double D2len = opCalcTreeIDLength(D2);
-        // double C1sq = pow(C1len, 2);
-        // double D2sq = pow(D2len, 2);
-        // double Asq = pow(C1len + C2len, 2);
-        // double Bsq = pow(D1len + D2len, 2);
-        // double C1_div_D2 = C1sq/Asq + D2sq/Bsq;
-        cout << "\nResults:" << endl;
-        cout << str(format("  ||C1|| = %.9f") % C1len) << endl;
-        cout << str(format("  ||C2|| = %.9f") % C2len) << endl;
-        cout << str(format("  ||D1|| = %.9f") % D1len) << endl;
-        cout << str(format("  ||D2|| = %.9f") % D2len) << endl;
-        cout << "  Check whether ||C1||/||D1|| < ||C2||/||D2||" << endl;
-        cout << str(format("    %.9f < %.9f") % (C1len/D1len) % (C2len/D2len));
-        cout << endl;
     }
 }
 
@@ -521,6 +608,9 @@ inline bool OP::opRefineSupport(const Split::treeid_pair_t & AB, Split::treeid_p
     vector<OPVertex> avect(AB.first.size());
     vector<OPVertex> bvect(AB.second.size());
 
+    // Calculate weights for the "A" vertices.
+    // For example, if A = {a1,a2,a3}, then the weight of a1 is
+    // weight a1 = a1^2 / (a1^2 + a2^2 + a3^2)
     unsigned aindex = 0;
     double asum = 0.0;
     for (auto & a : AB.first) {
@@ -532,6 +622,9 @@ inline bool OP::opRefineSupport(const Split::treeid_pair_t & AB, Split::treeid_p
         aindex++;
     }
 
+    // Calculate weights for the "B" vertices.
+    // For example, if B = {b1,b2,b3}, then the weight of b1 is
+    // weight b1 = b1^2 / (b1^2 + b2^2 + b3^2)
     unsigned bindex = 0;
     double bsum = 0.0;
     for (auto & b : AB.second) {
@@ -544,7 +637,9 @@ inline bool OP::opRefineSupport(const Split::treeid_pair_t & AB, Split::treeid_p
     }
 
     // Create the incompatibility graph
-    unsigned nincompatible = 0;
+    // A vertices go on the left, B vertices go on the right, and a
+    // line connects an A vertex to a B vertex only if the two vertices are incompatible
+    edgemap_t edgemap;
     auto asize = static_cast<unsigned>(avect.size());
     auto bsize = static_cast<unsigned>(bvect.size());
     for (unsigned i = 0; i < asize; i++) {
@@ -556,10 +651,12 @@ inline bool OP::opRefineSupport(const Split::treeid_pair_t & AB, Split::treeid_p
             if (!a->compatibleWith(*b)) {
                 // Create an edge in the incompatibility graph
                 avect[i]._children.push_back(&bvect[j]);
-                nincompatible++;
+                auto abpair = make_pair(&avect[i], &bvect[j]);
+                edgemap[abpair] = 0.0;
             }
         }
     }
+    auto nincompatible = static_cast<unsigned>(edgemap.size());
 
     bool success = false;
     if (nincompatible < asize*bsize) {
@@ -570,20 +667,65 @@ inline bool OP::opRefineSupport(const Split::treeid_pair_t & AB, Split::treeid_p
         //   C2 = A's contribution to independent set  (equals AB2.first)
         //   D1 = B's contribution to independent set  (equals AB1.second)
         //   D2 = B's contribution to vertex cover     (equals AB2.second)
+        // A1 and A2 must represent a non-trivial partition of A
+        // B1 and B2 must represent a non-trivial partition of B
         // C2 and D1 (AB2.first and AB1.second) are compatible sets of splits
         // C1 and D2 (AB1.first and AB2.second) compose the minimum weight vertex cover
-        // ||AB1.first||/||Ab1.second|| <= ||AB2.first||/||Ab2.second||
+        // ||C1||/||D1|| < ||C2||/||D2|| must be true
+        // If all of the above conditions hold, then the support can be refined:
+        // A = (A1,A2) and B = (B1,B2)
+        // where A1 = C1, A2 = C2, B1 = D1, and B2 = D2
         // Length of this segment of the geodesic is
-        //   L = sqrt{ (||AB1.first|| + ||AB1.second||)^2 +  (||AB2.first|| + ||AB2.second||)^2 }
+        //   L = sqrt{ (||A1|| + ||B1||)^2 +  (||A2|| + ||B2||)^2 }
         // Orthants crossed:
-        //   start:        AB1.first,  AB1.second
-        //   intermediate: AB1.second, AB2.first
-        //   finish:       AB1.second, AB2.second
-        opEdmondsKarp(avect, bvect, AB1.first, AB2.first, AB1.second, AB2.second, _quiet);
-        success = true;
+        //   start:        A1, A2
+        //      edges in A1 decreasing, edges in B1 increasing
+        //   intermediate: B1, A2
+        //      edges in A2 decreasing, edges in B2 increasing
+        //   finish:       B1, B2
+        // The point at which A1 edges become 0 is
+        //   ||A1||/(||A1|| + ||B1||)
+        // The point at which A2 edges become 0 is
+        //   ||A2||/(||A2|| + ||B2||)
+        opEdmondsKarp(avect, bvect, edgemap, AB1.first, AB2.first, AB1.second, AB2.second, _quiet);
+
+        // if (!quiet) {
+        //     cout << "\nResults:" << endl;
+        //     cout << str(format("  ||C1|| = %.9f") % C1len) << endl;
+        //     cout << str(format("  ||C2|| = %.9f") % C2len) << endl;
+        //     cout << str(format("  ||D1|| = %.9f") % D1len) << endl;
+        //     cout << str(format("  ||D2|| = %.9f") % D2len) << endl;
+        //     cout << "  Check whether ||C1||/||D1|| < ||C2||/||D2||" << endl;
+        //     cout << str(format("    %.9f < %.9f") % (C1len/D1len) % (C2len/D2len));
+        //     cout << endl;
+        // }
+
+        // Check conditions for successful refinement
+        bool A_is_trivial = (AB1.first.empty()) || (AB2.first.empty());
+        bool B_is_trivial = (AB1.second.empty())|| (AB2.second.empty());
+        double C1len = opCalcTreeIDLength(AB1.first);
+        double C2len = opCalcTreeIDLength(AB2.first);
+        double D1len = opCalcTreeIDLength(AB1.second);
+        double D2len = opCalcTreeIDLength(AB2.second);
+        bool P2 = C1len/D1len < C2len/D2len;
+        success = !A_is_trivial && !B_is_trivial && P2;
 
         if (!_quiet) {
-            cout << "\nSuccessfully refined support:" << endl;
+            if (success) {
+                cout << "\nSuccessfully refined support:" << endl;
+            }
+            else {
+                cout << "\nSupport not refined because:" << endl;
+                if (A_is_trivial) {
+                    cout << "  A is a trivial partition:" << endl;
+                }
+                if (B_is_trivial) {
+                    cout << "  B is a trivial partition:" << endl;
+                }
+                if (!P2) {
+                    cout << "  ||C1||/||D1|| is not strictly less than ||C2||/||D2||" << endl;
+                }
+            }
             // cout << "  Input A vertices:" << endl;
             // for (auto & a : AB.first) {
             //     cout << "    " << a.createPatternRepresentation() << endl;
@@ -593,20 +735,40 @@ inline bool OP::opRefineSupport(const Split::treeid_pair_t & AB, Split::treeid_p
             //     cout << "    " << b.createPatternRepresentation() << endl;
             // }
             cout << "  Output A1 vertices:" << endl;
-            for (auto & a : AB1.first) {
-                cout << "    " << a.createPatternRepresentation(true) << endl;
+            if (AB1.first.empty()) {
+                cout << "    empty set" << endl;
+            }
+            else {
+                for (auto & a : AB1.first) {
+                    cout << "    " << a.createPatternRepresentation(true) << endl;
+                }
             }
             cout << "  Output B1 vertices:" << endl;
-            for (auto & b : AB1.second) {
-                cout << "    " << b.createPatternRepresentation(true) << endl;
+            if (AB1.second.empty()) {
+                cout << "    empty set" << endl;
+            }
+            else {
+                for (auto & b : AB1.second) {
+                    cout << "    " << b.createPatternRepresentation(true) << endl;
+                }
             }
             cout << "  Output A2 vertices:" << endl;
-            for (auto & a : AB2.first) {
-                cout << "    " << a.createPatternRepresentation(true) << endl;
+            if (AB2.first.empty()) {
+                cout << "    empty set" << endl;
+            }
+            else {
+                for (auto & a : AB2.first) {
+                    cout << "    " << a.createPatternRepresentation(true) << endl;
+                }
             }
             cout << "  Output B2 vertices:" << endl;
-            for (auto & b : AB2.second) {
-                cout << "    " << b.createPatternRepresentation(true) << endl;
+            if (AB2.second.empty()) {
+                cout << "    empty set" << endl;
+            }
+            else {
+                for (auto & b : AB2.second) {
+                    cout << "    " << b.createPatternRepresentation(true) << endl;
+                }
             }
             cout << endl;
         }
@@ -684,34 +846,50 @@ inline double OP::calcBHVDistance(unsigned ref_index, unsigned test_index) const
 
     // Build the reference tree
     TreeManip starttm;
-    starttm.buildFromNewick(ref_newick, /*rooted*/ref_isrooted, /*allow_polytomies*/false);
+    starttm.buildFromNewick(ref_newick, /*rooted*/ref_isrooted, /*allow_polytomies*/true);
     //TODO: get rooted status from treeManip object
 
     // Store splits from the reference tree
-    Split::treeid_t A;
+    Split::treeid_t A0;
     Split::treeid_t Alvs;
-    starttm.storeSplits(A, Alvs);
+    starttm.storeSplits(A0, Alvs);
+
+    // Only save splits with non-zero edge length
+    Split::treeid_t A;
+    for (auto & a : A0) {
+        if (a.getEdgeLen() > 0.0) {
+            A.insert(a);
+        }
+    }
 
     if (!_quiet) {
         cout << "Internal splits from starting tree:" << endl;
         for (const auto& a : A) {
-            cout << "  " << a.createPatternRepresentation() << endl;
+            cout << "  " << a.createPatternRepresentation(true) << endl;
         }
     }
 
     // Build the test tree
     TreeManip endtm;
-    endtm.buildFromNewick(test_newick, /*rooted*/test_isrooted, /*allow_polytomies*/false);
+    endtm.buildFromNewick(test_newick, /*rooted*/test_isrooted, /*allow_polytomies*/true);
 
     // Store splits from the reference tree
-    Split::treeid_t B;
+    Split::treeid_t B0;
     Split::treeid_t Blvs;
-    endtm.storeSplits(B, Blvs);
+    endtm.storeSplits(B0, Blvs);
+
+    // Only save splits with non-zero edge length
+    Split::treeid_t B;
+    for (auto & b : B0) {
+        if (b.getEdgeLen() > 0.0) {
+            B.insert(b);
+        }
+    }
 
     if (!_quiet) {
         cout << "Internal splits from ending tree:" << endl;
         for (const auto& b : B) {
-            cout << "  " << b.createPatternRepresentation() << endl;
+            cout << "  " << b.createPatternRepresentation(true) << endl;
         }
     }
 
@@ -722,11 +900,23 @@ inline double OP::calcBHVDistance(unsigned ref_index, unsigned test_index) const
     vector<Split> common_edges;
     double common_edge_contribution_squared = opFindCommonEdges(A, B, common_edges);
 
+#if 0
     // Create a vector of paired subtrees by splitting at common edges
     vector<pair<Split::treeid_t, Split::treeid_t> > in_pairs;
     in_pairs.emplace_back(A,B);
     if (!common_edges.empty())
         opSplitAtCommonEdges(common_edges, in_pairs);
+#else
+    if (!common_edges.empty()) {
+        // Remove splits representing common edge from both A and B
+        for (auto & c : common_edges) {
+            A.erase(c);
+            B.erase(c);
+        }
+    }
+    vector<pair<Split::treeid_t, Split::treeid_t> > in_pairs;
+    in_pairs.emplace_back(A,B);
+#endif
 
     unsigned pair_index = 1;
     vector<double> geodesic_distances;
@@ -740,12 +930,12 @@ inline double OP::calcBHVDistance(unsigned ref_index, unsigned test_index) const
         if (!_quiet) {
             cout << "  A splits:" << endl;
             for (const auto& a : ABpairs[0].first) {
-                cout << "    " << a.createPatternRepresentation() << endl;
+                cout << "    " << a.createPatternRepresentation(true) << endl;
             }
 
             cout << "  B splits:" << endl;
             for (const auto& b : ABpairs[0].second) {
-                cout << "    " << b.createPatternRepresentation() << endl;
+                cout << "    " << b.createPatternRepresentation(true) << endl;
             }
         }
 
@@ -792,7 +982,7 @@ inline double OP::calcKFDistance(unsigned ref_index, unsigned test_index) const 
 
     // Build the reference tree
     TreeManip reftm;
-    reftm.buildFromNewick(ref_newick, /*rooted*/ref_isrooted, /*allow_polytomies*/false);
+    reftm.buildFromNewick(ref_newick, /*rooted*/ref_isrooted, /*allow_polytomies*/true);
     //TODO: get rooted status from treeManip object
 
     // Store splits from the reference tree
@@ -889,12 +1079,24 @@ for (const auto& p : leafmap0) {
 
 inline void OP::run() {
     try {
-        // Read in a tree
-        _tree_summary = make_shared<TreeSummary>();
+        // Read in trees
+        _tree_summary = std::make_shared<TreeSummary>();
         _tree_summary->readTreefile(_tree_file_name, 0);
         unsigned ntrees = _tree_summary->getNumTrees();
         if (ntrees < 2) {
             throw Xop("Must input at least 2 trees to compute tree distances");
+        }
+
+        if (_output_for_gtp) {
+            ofstream gtpf("trees-for-gtp.txt");
+            for (unsigned i = 0; i < ntrees; ++i) {
+                gtpf << _tree_summary->getNewick(i) << ";\n";
+            }
+            gtpf.close();
+
+            // If output for gtp was requested, then that is all
+            // we try to do on this run
+            return;
         }
 
         if (_distance_measure == "geodesic") {
@@ -904,7 +1106,7 @@ inline void OP::run() {
             outf << "tree	distance to tree 1" << endl;
             for (unsigned i = 1; i < ntrees; i++) {
                 double bhvdist = calcBHVDistance(0, i);
-                outf << str(format("%d\t%.5f") % (i+1) % bhvdist) << endl;
+                outf << (i+1) << '\t' << setprecision(static_cast<int>(_precision)) << bhvdist << '\n';
             }
             outf.close();
         }
@@ -922,7 +1124,7 @@ inline void OP::run() {
         }
     }
     catch (Xop & x) {
-        cerr << "Strom encountered a problem:\n  " << x.what() << endl;
+        cerr << "OP encountered a problem:\n  " << x.what() << endl;
         }
 }
 

@@ -68,7 +68,7 @@ inline Tree::SharedPtr TreeSummary::getTree(unsigned index)
     TreeManip tm;
 
     // build the tree
-    tm.buildFromNewick(_newicks[index], false, false);
+    tm.buildFromNewick(_newicks[index], false, true);
 
     return tm.getTree();
     }
@@ -164,7 +164,7 @@ inline void TreeSummary::readTreefile(const string filename, unsigned skip)
                     unsigned tree_index = (unsigned)_newicks.size() - 1;
 
                     // build the tree
-                    tm.buildFromNewick(newick, /*rooted*/is_rooted, /*allow_polytomies*/false);
+                    tm.buildFromNewick(newick, /*rooted*/is_rooted, /*allow_polytomies*/true);
 
                     // store set of splits
                     splitset.clear();
