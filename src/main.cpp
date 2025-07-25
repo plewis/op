@@ -1,7 +1,7 @@
 #include <iostream>
 
 // Uncomment the line below to save incompatibility graphs as dot files for debugging purposes
-#define OP_SAVE_DOT_FILE
+//#define OP_SAVE_DOT_FILE
 
 #include "op.hpp"
 
@@ -18,8 +18,8 @@ unsigned OP::_graph_number          = 1;
 #endif
 
 int main(int argc, const char * argv[]) {
-    OP strom;
     try {
+        OP strom;
         strom.processCommandLineOptions(argc, argv);
         strom.run();
     }

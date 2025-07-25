@@ -15,44 +15,61 @@ using namespace boost;
 namespace op {
 
 class OP {
-    public:
-                            OP();
-                            ~OP();
+public:
+    OP();
+    ~OP();
 
-        void                clear();
-        void                processCommandLineOptions(int argc, const char * argv[]);
-        double              calcBHVDistance(unsigned ref_index, unsigned test_index) const;
-        double              calcKFDistance(unsigned ref_index, unsigned test_index) const;
-        void                run();
+    void                clear();
+    void                processCommandLineOptions(int argc, const char * argv[]);
+    double              calcBHVDistance(unsigned ref_index, unsigned test_index) const;
+    double              calcKFDistance(unsigned ref_index, unsigned test_index) const;
+    void                run();
 
-    private:
+private:
 
-        static double opCalcTreeIDLength(
-            const Split::treeid_t & splits);
-        double opCalcLeafContribution(
-            const Split::treeid_t & Alvs,
-            const Split::treeid_t & Blvs) const;
-        double opFindCommonEdges(
-            const Split::treeid_t & A,
-            const Split::treeid_t & B,
-            vector<Split> & common_edges) const;
-        void opSplitAtCommonEdges(
-            const vector<Split> & common_edges,
-            vector<pair<Split::treeid_t,Split::treeid_t> > & in_pairs) const;
+    static double opCalcTreeIDLength(
+        const Split::treeid_t & splits);
+    double opCalcLeafContribution(
+        const Split::treeid_t & Alvs,
+        const Split::treeid_t & Blvs) const;
+    double opFindCommonEdges(
+        const Split::treeid_t & A,
+        const Split::treeid_t & B,
+        vector<Split> & common_edges) const;
+    void opSplitAtCommonEdges(
+        const vector<Split> & common_edges,
+        vector<pair<Split::treeid_t,Split::treeid_t> > & in_pairs) const;
 #if defined(OP_SAVE_DOT_FILE)
-        static void opSaveIncompatibilityGraph(
-            vector<OPVertex> & avect,
-            vector<OPVertex> & bvect);
+    static string opCreateVertexLabel(string name, string capacity, string edgelen, string bipartition);
+    static string opCreateEdgeLabel(double capacity, double reverse_flow);
+    static void opSaveIncompatibilityGraph(
+        OPVertex & source,
+        OPVertex & sink,
+        vector<OPVertex> & avect,
+        vector<OPVertex> & bvect);
 #endif
-        static void opEdmondsKarp(
-            vector<OPVertex> & avect,
-            vector<OPVertex> & bvect,
-            edgemap_t & edgemap,
-            Split::treeid_t & C1,
-            Split::treeid_t & C2,
-            Split::treeid_t & D1,
-            Split::treeid_t & D2,
-            bool quiet);
+#if 1
+    static void opEdmondsKarp(
+        OPVertex & source,
+        OPVertex & sink,
+        vector<OPVertex> & avect,
+        vector<OPVertex> & bvect,
+        Split::treeid_t & C1,
+        Split::treeid_t & C2,
+        Split::treeid_t & D1,
+        Split::treeid_t & D2,
+        bool quiet);
+#else
+    static void opEdmondsKarp(
+        vector<OPVertex> & avect,
+        vector<OPVertex> & bvect,
+        edgemap_t & edgemap,
+        Split::treeid_t & C1,
+        Split::treeid_t & C2,
+        Split::treeid_t & D1,
+        Split::treeid_t & D2,
+        bool quiet);
+#endif
         bool opRefineSupport(
             const Split::treeid_pair_t & AB,
             Split::treeid_pair_t & AB1,
@@ -230,8 +247,8 @@ inline double OP::opFindCommonEdges(const Split::treeid_t & A, const Split::tree
 inline void OP::opSplitAtCommonEdges(const vector<Split> & common_edges, vector<pair<Split::treeid_t,Split::treeid_t> > & in_pairs) const {
     vector<pair<Split::treeid_t,Split::treeid_t> > out_pairs;
     for (auto & common : common_edges) {
-        //temporary!
-        cout << "\ncommon: " << common.createPatternRepresentation() << endl;
+        // //temporary!
+        // cout << "\ncommon: " << common.createPatternRepresentation() << endl;
 
         // Create a mask that can be used to zero out all bits in common except the first
         Split mask = common;
@@ -239,12 +256,12 @@ inline void OP::opSplitAtCommonEdges(const vector<Split> & common_edges, vector<
         unsigned first_common_bit = common.findFirstSetBit();
         mask.setBitAt(first_common_bit);
 
-        //temporary!
-        cout << "  mask: " << mask.createPatternRepresentation() << endl;
+        // //temporary!
+        // cout << "  mask: " << mask.createPatternRepresentation() << endl;
 
         for (auto & inpair : in_pairs) {
-            //temporary!
-            cout << "\n***** new tree pair *****" << endl;
+            // //temporary!
+            // cout << "\n***** new tree pair *****" << endl;
             // Separate out splits in starting (a_splits) vs. ending (b_splits) (sub)trees
             Split::treeid_t & a_splits = inpair.first;
             Split::treeid_t & b_splits = inpair.second;
@@ -254,29 +271,29 @@ inline void OP::opSplitAtCommonEdges(const vector<Split> & common_edges, vector<
             Split::treeid_t a_other_splits, b_other_splits;
 
             // Divvy up a_splits to a_common_splits and a_other_splits
-            //temporary!
-            cout << "  Divvying up a_splits:" << endl;
+            // //temporary!
+            // cout << "  Divvying up a_splits:" << endl;
             for (auto & asplit : a_splits) {
-                //temporary!
-                cout << "    asplit: " << asplit.createPatternRepresentation();
+                // //temporary!
+                // cout << "    asplit: " << asplit.createPatternRepresentation();
                 bool is_common = (asplit == common);
                 if (is_common) {
-                    //temporary!
-                    cout << " (common)" << endl;
+                    // //temporary!
+                    // cout << " (common)" << endl;
                 }
                 else {
                     if (asplit.subsumedIn(common)) {
-                        //temporary!
-                        cout << " (subsumed in common)" << endl;
+                        // //temporary!
+                        // cout << " (subsumed in common)" << endl;
                         a_common_splits.insert(asplit);
                     }
                     else {
-                        //temporary!
-                        cout << " (other)" << endl;
+                        // //temporary!
+                        // cout << " (other)" << endl;
                         Split masked = asplit;
                         masked.bitwiseAnd(mask);
-                        //temporary!
-                        cout << "    masked: " << masked.createPatternRepresentation() << endl;
+                        // //temporary!
+                        // cout << "    masked: " << masked.createPatternRepresentation() << endl;
                         a_other_splits.insert(masked);
                     }
                 }
@@ -337,36 +354,134 @@ inline void OP::opSplitAtCommonEdges(const vector<Split> & common_edges, vector<
 }
 
 #if defined(OP_SAVE_DOT_FILE)
-inline void OP::opSaveIncompatibilityGraph(vector<OPVertex> & avect, vector<OPVertex> & bvect) {
-    unsigned minsize = min(avect.size(), bvect.size());
-    unsigned maxsize = max(avect.size(), bvect.size());
+inline string OP::opCreateVertexLabel(string name, string capacity, string edgelen, string bipartition) {
+    string s = "";
+    s += "<<table bgcolor=\"white\" border=\"0\">";
+    s += "<tr><td><b><font color=\"blue\" face=\"Courier\" point-size=\"16\">%s</font></b></td></tr>";
+    s += "<tr><td><b><font color=\"blue\" face=\"Courier\" point-size=\"16\">%s</font></b></td></tr>";
+    s += "<tr><td><font color=\"black\" face=\"Courier\" point-size=\"10\">%s</font></td></tr>";
+    s += "<tr><td><font color=\"black\" face=\"Courier\" point-size=\"10\">%s</font></td></tr>";
+    s += "</table>>";
+    return str(format(s) % name % capacity % bipartition % edgelen);
+}
+
+inline string OP::opCreateEdgeLabel(double capacity, double reverse_flow) {
+    string s = "";
+    s += "\tlabeldistance=8\n";
+    s += "\tlabelangle=0\n";
+#if 1
+    s += "\theadlabel=<<font color=\"red\" face=\"Verdana\" point-size=\"12\">%.3f</font>>\n";
+#else
+    s += "\theadlabel=<\n";
+    s += "\t\t<table bgcolor=\"white\" border=\"0\">\n";
+    s += "\t\t\t<tr>\n";
+    s += "\t\t\t\t<td>\n";
+    s += "\t\t\t\t\t<font color=\"blue\" face=\"Courier\" point-size=\"10\">%.3f</font>\n";
+    s += "\t\t\t\t</td>\n";
+    s += "\t\t\t</tr>\n";
+    s += "\t\t\t<tr>\n";
+    s += "\t\t\t\t<td>\n";
+    s += "\t\t\t\t\t<font color=\"red\" face=\"Courier\" point-size=\"10\">%.3f</font>\n";
+    s += "\t\t\t\t</td>\n";
+    s += "\t\t\t</tr>\n";
+    s += "\t\t</table>\n";
+    s += "\t>\n";
+#endif
+    return str(format(s) % reverse_flow);
+}
+
+inline void OP::opSaveIncompatibilityGraph(OPVertex & source, OPVertex & sink, vector<OPVertex> & avect, vector<OPVertex> & bvect) {
+    // Example of the kind of dot file generated by this function:
+    // digraph G {
+    //     rankdir=LR;
+    //     graph [ranksep=2];
+    //
+    //     subgraph Avertices {
+    //         label="A";
+    //             {
+    //             rank=same;
+    //             a1 [label = "0.349\na1\n----**-", shape = box, color = black];
+    //             a2 [label = "0.100\na2\n--*-**-", shape = box, color = black];
+    //             a3 [label = "0.240\na3\n-**-**-", shape = box, color = black];
+    //             }
+    //         a1 -> a2 [dir=none, style=invisible];
+    //         a2 -> a3 [dir=none, style=invisible];
+    //     }
+    //
+    //     subgraph Bvertices {
+    //         label="B";
+    //             {
+    //             rank=same;
+    //             b1 [label = "0.016\nb1\n--*-*--", shape = box, color = black];
+    //             b2 [label = "0.524\nb2\n-**-*--", shape = box, color = black];
+    //             b3 [label = "0.122\nb3\n-----**", shape = box, color = black];
+    //             b4 [label = "0.339\nb4\n-**-***", shape = box, color = black];
+    //             }
+    //         b1 -> b2 [dir=none, style=invisible];
+    //         b2 -> b3 [dir=none, style=invisible];
+    //         b3 -> b4 [dir=none, style=invisible];
+    //     }
+    //
+    //     a1 -> b1;
+    //     a1 -> b2;
+    //     a1 -> b3;
+    //     a2 -> b2;
+    //     a2 -> b3;
+    //     a3 -> b3;
+    //     a3 -> b4;
+    // }
+    //
+    //
+
+    auto asize = static_cast<unsigned>(avect.size());
+    auto bsize = static_cast<unsigned>(bvect.size());
+    unsigned minsize = min(asize, bsize);
+    unsigned maxsize = max(asize, bsize);
 
     // Save all the entities needed
     // tuple key: <0> name, <1>capacity, <2>edgelen, <3>split, <4>shape, <5>color
-    typedef vector<std::tuple<string, string, string, string, string, string> > gnode_t;
-    gnode_t anodes, bnodes;
-    for (unsigned i = 0; i < avect.size(); i++) {
-        string name     = str(format("a%d") % (i+1));
-        string capacity = (avect[i]._capacity == 0.0 ? "\"0\"" : str(format("\"%.3f\"") % avect[i]._capacity));
-        string edgelen = str(format("\"%.3f\"") % avect[i]._split->getEdgeLen());
-        string split   = str(format("\"%.3f\"") % avect[i]._split->createPatternRepresentation(true));
-        string shape   = (avect[i]._capacity == 0.0 ? "circle" : "box");
-        string color   = (avect[i]._capacity == 0.0 ? "red" : "black");
+    typedef std::tuple<string, string, string, string, string, string> gnode_element_t;
+    typedef vector<gnode_element_t> gnode_t;
+
+    // Save everything needed for the A nodes
+    gnode_t anodes;
+    for (unsigned i = 0; i < source._edges.size(); i++) {
+        OPEdge * edge   = source._edges[i];
+        string name     = edge->_to->_name;
+        string capacity = (edge->_capacity == 0.0 ? "0" : str(format("%.3f") % edge->_capacity));
+        string edgelen  = str(format("%.3f") % edge->_to->_split->getEdgeLen());
+        string split    = str(format("%.3f") % edge->_to->_split->createPatternRepresentation(false));
+        string shape    = (edge->_capacity == 0.0 ? "circle" : "box");
+        string color    = (edge->_capacity == 0.0 ? "red" : "black");
         anodes.emplace_back(name, capacity, edgelen, split, shape, color);
     }
-
-    for (unsigned i = 0; i < bvect.size(); i++) {
-        string name     = str(format("b%d") % (i+1));
-        string capacity = (bvect[i]._capacity == 0.0 ? "\"0\"" : str(format("\"%.3f\"") % bvect[i]._capacity));
-        string edgelen = str(format("\"%.3f\"") % bvect[i]._split->getEdgeLen());
-        string split   = str(format("\"%.3f\"") % bvect[i]._split->createPatternRepresentation(true));
-        string shape   = (bvect[i]._capacity == 0.0 ? "circle" : "box");
-        string color   = (bvect[i]._capacity == 0.0 ? "red" : "black");
-        bnodes.emplace_back(name, capacity, edgelen, split, shape, color);
+    if (asize < maxsize) {
+        for (unsigned i = asize; i < maxsize; i++) {
+            anodes.emplace_back(str(format("adummy%d") % (i+1)), "0", "0", "0", "box", "black");
+        }
     }
 
+    // Save everything needed for the B nodes
+    gnode_t bnodes;
+    for (unsigned i = 0; i < bsize; i++) {
+        assert(bvect[i]._edges.size() == 1);
+        OPEdge * edge   = bvect[i]._edges[0];
+        string name     = edge->_from->_name;
+        string capacity = (edge->_capacity == 0.0 ? "0" : str(format("%.3f") % edge->_capacity));
+        string edgelen  = str(format("%.3f") % bvect[i]._split->getEdgeLen());
+        string split    = str(format("%.3f") % bvect[i]._split->createPatternRepresentation(false));
+        string shape    = (edge->_capacity == 0.0 ? "circle" : "box");
+        string color    = (edge->_capacity == 0.0 ? "red" : "black");
+        bnodes.emplace_back(name, capacity, edgelen, split, shape, color);
+    }
+    if (bsize < maxsize) {
+        for (unsigned i = bsize; i < maxsize; i++) {
+            bnodes.emplace_back(str(format("bdummy%d") % (i+1)), "0", "0", "0", "box", "black");
+        }
+    }
+
+    // Create (or append to) a rundot.sh file containing commands to compile all the incompatibility graphs
     if (OP::_graph_number == 1) {
-        // Create a rundot.sh file containing commands to compile all the incompatibility graphs
         ofstream shf("rundot.sh");
         shf << "#!/bin/bash\n\n";
         shf << "# This file requires previous installation of dot and is intended\n";
@@ -383,66 +498,89 @@ inline void OP::opSaveIncompatibilityGraph(vector<OPVertex> & avect, vector<OPVe
         shf.close();
     }
 
+    // Open the dot file
+    cout << "Saving incompatibility graph to file: " << str(format("graph-%d.dot") % OP::_graph_number) << endl;
     ofstream dotf(str(format("graph-%d.dot") % OP::_graph_number++));
 
+    // Create the opening preamble
     dotf << "digraph G {\n";
-    dotf << "\trankdir=LR;\n\n";
+    dotf << "\trankdir=LR;\n";
+    dotf << "\tgraph [ranksep=2];\n\n";
 
-    for (unsigned i = 0; i < minsize; i++) {
-        dotf << str(format("\t{ rank = %d; %s [shape = plain]; %s [label = %s, shape = %s, color = %s]; %s [label = %s, shape = %s, color = %s]; %s [shape = plain]}\n")
-            % (i+1)
-            % get<3>(anodes[i])
-            % get<0>(anodes[i])
-            % get<1>(anodes[i])
-            % get<4>(anodes[i])
-            % get<5>(anodes[i])
-            % get<0>(bnodes[i])
-            % get<1>(bnodes[i])
-            % get<4>(bnodes[i])
-            % get<5>(bnodes[i])
-            % get<3>(bnodes[i])
-        );
-    }
+    // Create a subgraph containing only the A vertices in a vertical rank
+    dotf << "\tsubgraph Avertices {\n";
+    dotf << "\t    label=\"A\";\n";
+    dotf << "\t    {\n";
+    dotf << "\t        rank=same;\n";
+    for (unsigned i = 0; i < maxsize; i++) {
+        if (i < asize) {
+            // tuple key: <0> name, <1>capacity, <2>edgelen, <3>split, <4>shape, <5>color
 
-    for (unsigned i = minsize; i < maxsize; i++) {
-        if (i < avect.size()) {
-            dotf << str(format("\t{ rank = %d; %s [label = %s, shape = %s, color = %s]; }\n")
-                % (i+1)
+            dotf << str(format("\t        %s [label = %s, shape = %s, color = %s];\n")
                 % get<0>(anodes[i])
-                % get<1>(anodes[i])
+                % opCreateVertexLabel(get<0>(anodes[i]), get<1>(anodes[i]), get<2>(anodes[i]), get<3>(anodes[i]))
                 % get<4>(anodes[i])
                 % get<5>(anodes[i])
             );
         }
         else {
-            dotf << str(format("\t{ rank = %d; %s [label = %s, shape = %s, color = %s]; }\n")
-                % (i+1)
+            dotf << str(format("\t        %s [style = invisible];\n")
+                % get<0>(anodes[i])
+            );
+        }
+    }
+    dotf << "\t    }\n";
+    for (unsigned i = 0; i < maxsize - 1; i++) {
+        dotf << str(format("\t    %s -> %s [dir=none, style=invisible];\n")
+                % get<0>(anodes[i])
+                % get<0>(anodes[i+1])
+        );
+    }
+    dotf << "\t}\n";
+
+    // Create a subgraph containing only the B vertices in a vertical rank
+    dotf << "\tsubgraph Bvertices {\n";
+    dotf << "\t    label=\"B\";\n";
+    dotf << "\t    {\n";
+    dotf << "\t        rank=same;\n";
+    for (unsigned i = 0; i < maxsize; i++) {
+        if (i < bsize) {
+            dotf << str(format("\t        %s [label = %s, shape = %s, color = %s];\n")
                 % get<0>(bnodes[i])
-                % get<1>(bnodes[i])
+                % opCreateVertexLabel(get<0>(bnodes[i]), get<1>(bnodes[i]), get<2>(bnodes[i]), get<3>(bnodes[i]))
                 % get<4>(bnodes[i])
                 % get<5>(bnodes[i])
             );
         }
-    }
-
-    // dotf << "\t{\n";
-
-    for (auto & anode : anodes) {
-        dotf << str(format("\t\t%s -> %s [style = invis];\n") % get<3>(anode) % get<0>(anode));
-    }
-
-    for (unsigned i = 0; i < avect.size(); ++i) {
-        auto a = avect[i]._split;
-        for (unsigned j = 0; j < bvect.size(); ++j) {
-            auto b = bvect[j]._split;
-            if (!a->compatibleWith(*b)) {
-                dotf << str(format("\t\t%s -> %s;\n") % get<0>(anodes[i]) % get<0>(bnodes[j]));
-            }
+        else {
+            dotf << str(format("\t        %s [style = invisible];\n")
+                % get<0>(bnodes[i])
+            );
         }
     }
+    dotf << "\t    }\n";
+    for (unsigned i = 0; i < maxsize - 1; i++) {
+        dotf << str(format("\t    %s -> %s [dir=none, style=invisible];\n")
+                % get<0>(bnodes[i])
+                % get<0>(bnodes[i+1])
+        );
+    }
+    if (bsize < maxsize) {
+        dotf << str(format("\t    %s -> bdummy%d [dir=none, style=invisible];\n")
+            % get<0>(anodes[bsize-1])
+            % (bsize+1));
+        for (unsigned i = bsize; i < maxsize - 1; i++) {
+            dotf << str(format("\t    bdummy%d -> bdummy%d [dir=none, style=invisible];\n") % (i+1) % (i+2));
+        }
+    }
+    dotf << "\t}\n";
 
-    for (auto & bnode : bnodes) {
-        dotf << str(format("\t\t%s -> %s [style = invis, dir = back];\n") % get<0>(bnode) % get<3>(bnode));
+    // Create the edges connecting A with B vertices
+    for (unsigned i = 0; i < asize; ++i) {
+        for (unsigned j = 0; j < avect[i]._edges.size(); ++j) {
+            OPEdge * edge = avect[i]._edges[j];
+            dotf << str(format("\t\t%s -> %s [%s];\n") % edge->_from->_name % edge->_to->_name % opCreateEdgeLabel(edge->_capacity, edge->_reverse_flow));
+        }
     }
 
     // dotf << "\t}\n";
@@ -451,6 +589,219 @@ inline void OP::opSaveIncompatibilityGraph(vector<OPVertex> & avect, vector<OPVe
 }
 #endif
 
+#if 1
+    inline void OP::opEdmondsKarp(
+            OPVertex & source,
+            OPVertex & sink,
+            vector<OPVertex> & avect,
+            vector<OPVertex> & bvect,
+            Split::treeid_t & C1,
+            Split::treeid_t & C2,
+            Split::treeid_t & D1,
+            Split::treeid_t & D2,
+            bool quiet) {
+#if defined(OP_SAVE_DOT_FILE)
+    opSaveIncompatibilityGraph(source, sink, avect, bvect);
+#endif
+
+        double cumulative_flow = 0.0;
+        bool done_augmenting_path = false;
+        while (!done_augmenting_path) {
+            vector<OPVertex *> route;
+
+            // All vertices begin as unvisited, have residual capacity 0, and all "A" to "B" edges begin as non-reversed
+            source._parent_edge = nullptr;
+            for (auto & a : avect) {
+                a._parent_edge = nullptr;
+                a._residual_capacity = 0.0;
+                for (auto & a_edge : a._edges) {
+                    a_edge->_edge_is_reversed = false;
+                }
+            }
+            for (auto & b : bvect) {
+                b._parent_edge = nullptr;
+            }
+            sink._parent_edge = nullptr;
+
+            //
+
+
+            // Add the source to the route
+            route.push_back(&source);
+            unsigned route_cursor = 0;
+
+            // Find the next augmenting route
+            bool sink_found = false;
+            while (!sink_found) {
+                OPVertex * current = route[route_cursor];
+                for (auto & edge : current->_edges) {
+                    // //temporary!
+                    // cout << "checking " << edge->_from->_name << " -> " << edge->_to->_name << endl;
+                    if (edge->_capacity > 0.0 && edge->_to->_parent_edge == nullptr) {
+                        edge->_to->_parent_edge = edge;
+
+                        // //temporary!
+                        // cout << "  adding edge to route" << endl;
+
+                        route.push_back(edge->_to);
+                        if (edge->_to == &sink) {
+                            sink_found = true;
+                            break;
+                        }
+                    }
+                    else {
+                        bool already_visited = edge->_to->_parent_edge != nullptr;
+                        bool capacity_zero = edge->_capacity == 0.0;
+                        if (already_visited && capacity_zero) {
+                            // //temporary!
+                            // cout << "  rejected edge because capacity is zero and to-vertex already visited" << endl;
+                        }
+                        else if (already_visited) {
+                            // //temporary!
+                            // cout << "  rejected edge because to-vertex already visited" << endl;
+                        }
+                        else {
+                            // //temporary!
+                            // cout << "  rejected edge because capacity is zero" << endl;
+
+                            // If it is a "B" vertex that has zero capacity, then the route cannot
+                            // go from thix "B" vertex to the sink but it may be able to go back to
+                            // an "A" vertex if that "A" vertex was not accessible from the source
+                            // and there is residual flow on the edge
+                            if (edge->_to == &sink) {
+                                OPVertex * B_vertex = edge->_from;
+                                for (unsigned j = 0; j < source._edges.size(); j++) {
+                                    OPEdge * s_to_A_edge = source._edges[j];  // edge from source to an "A" vertex
+                                    if (s_to_A_edge->_capacity == 0) {
+                                        // See if any of the "A" vertex edges lead to the "B" vertex in question
+                                        OPVertex * A_vertex = s_to_A_edge->_to;
+                                        for (unsigned k = 0; k < A_vertex->_edges.size(); k++) {
+                                            OPEdge * A_to_B_edge = A_vertex->_edges[k];  // edge from "A" to a "B" vertex
+                                            if (A_vertex->_parent_edge == nullptr && A_to_B_edge->_to == B_vertex && A_to_B_edge->_reverse_flow > 0.0) {
+                                                // If we are here, we know that:
+                                                // 1. the "A" vertex has not been visited
+                                                // 2. the "A" vertex is joined to the "B" vertex in question
+                                                // 3. the "A" vertex is not accessible from the source, and
+                                                // 4. there is residual flow on the A_to_B_edge
+
+                                                // //temporary!
+                                                // cout << "  adding REVERSE edge to route (" << B_vertex->_name << " -> " << A_vertex->_name << ")" << endl;
+
+                                                // //temporary!
+                                                // if (A_to_B_edge->_from->_name == "a2" && A_to_B_edge->_to->_name == "b4") {
+                                                //     cerr << "*** debug breakpoint ***" << endl;
+                                                // }
+
+                                                A_vertex->_parent_edge = A_to_B_edge;
+                                                A_to_B_edge->_edge_is_reversed = true;
+                                                A_vertex->_residual_capacity = A_to_B_edge->_reverse_flow;
+                                                route.push_back(A_vertex);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                route_cursor++;
+                if (route_cursor >= route.size()) {
+                    // Not able to reach sink, so all augmenting routes have been found
+                    done_augmenting_path = true;
+                    break;
+                }
+            }
+
+            if (!done_augmenting_path) {
+                // Follow _from pointers from sink back to source to identify
+                // the bottleneck and determine flow through this route
+                double min_capacity = 1.0;
+                OPVertex * current = &sink;
+                while (current != &source) {
+                    // //temporary!
+                    //cerr << "current = " << current->_name << endl;
+                    OPEdge * edge = current->_parent_edge;
+                    if (edge->_edge_is_reversed) {
+                        if (edge->_reverse_flow < min_capacity) {
+                            min_capacity = edge->_reverse_flow;
+                        }
+                        current = edge->_to;
+                    }
+                    else {
+                        if (edge->_capacity < min_capacity) {
+                            min_capacity = edge->_capacity;
+                        }
+                        current = edge->_from;
+                    }
+                }
+
+                // Adjust capacities and flows along the route
+                cumulative_flow += min_capacity;
+                current = &sink;
+                while (current != &source) {
+                    OPEdge * edge = current->_parent_edge;
+                    if (edge->_edge_is_reversed) {
+                        edge->_reverse_flow -= min_capacity;
+                        if (fabs(edge->_reverse_flow) < 1e-10)
+                            edge->_reverse_flow = 0.0;
+                        edge->_capacity += min_capacity;
+                        current = edge->_to;
+                    }
+                    else {
+                        edge->_capacity -= min_capacity;
+                        if (fabs(edge->_capacity) < 1e-10)
+                            edge->_capacity = 0.0;
+                        edge->_reverse_flow += min_capacity;
+                        current = edge->_from;
+                    }
+                }
+            }
+#if defined(OP_SAVE_DOT_FILE)
+        opSaveIncompatibilityGraph(source, sink, avect, bvect);
+
+        // //temporary!
+        // cerr << "just saved dot graph" << endl;
+#endif
+        }   // while (!done_augmenting_path)
+
+    // Identify C1, C2, D1, and D2
+    // C1 and D2 compose the min weight vertex cover
+    // C2 and D` compose the independent set
+    for (auto & source_edge : source._edges) {
+        OPVertex * avertex = source_edge->_to;
+        if (source_edge->_capacity > 0.0 || avertex->_residual_capacity > 0.0) {
+            // Because this source edge has remaining capacity, its distal vertex is part of the independent set
+            C2.insert(*(avertex->_split));
+
+            // This A vertex allows access to the B side, so any connected B vertices with
+            // zero capacity are part of the vertex cover
+            for (const auto central_edge : avertex->_edges) {
+                OPVertex * bvertex = central_edge->_to;
+                assert(bvertex->_edges.size() == 1);
+                OPEdge * sink_edge = bvertex->_edges[0];
+                if (sink_edge->_capacity == 0.0) {
+                    D2.insert(*(bvertex->_split));
+                }
+            }
+        }
+        else {
+            // Because this A-vertex has zero capacity, it is part of the vertex cover
+            C1.insert(*(avertex->_split));
+
+            // No need to consider connected B vertices because this A-vertex already
+            // covers all connected edges
+        }
+    }
+
+    // D1 includes every split not in D2
+    D1.clear();
+    for (auto & b : bvect) {
+        if (D2.count(*(b._split)) == 0) {
+            D1.insert(*(b._split));
+        }
+    }
+}
+#else
 inline void OP::opEdmondsKarp(
         vector<OPVertex> & avect,
         vector<OPVertex> & bvect,
@@ -602,11 +953,15 @@ inline void OP::opEdmondsKarp(
         }
     }
 }
+#endif
 
 inline bool OP::opRefineSupport(const Split::treeid_pair_t & AB, Split::treeid_pair_t & AB1, Split::treeid_pair_t & AB2) const {
     // Create a vector of incompatibility graph vertices
     vector<OPVertex> avect(AB.first.size());
     vector<OPVertex> bvect(AB.second.size());
+
+    //                                      23  123  456  123456
+    //vector<unsigned> a_splits_in_order = { 6,   7,  56,     63};
 
     // Calculate weights for the "A" vertices.
     // For example, if A = {a1,a2,a3}, then the weight of a1 is
@@ -618,7 +973,7 @@ inline bool OP::opRefineSupport(const Split::treeid_pair_t & AB, Split::treeid_p
     }
     for (auto & a : AB.first) {
         avect[aindex]._split = &a;
-        avect[aindex]._capacity = pow(a.getEdgeLen(),2)/asum;
+        avect[aindex]._weight = pow(a.getEdgeLen(),2)/asum;
         aindex++;
     }
 
@@ -630,36 +985,117 @@ inline bool OP::opRefineSupport(const Split::treeid_pair_t & AB, Split::treeid_p
     for (auto & b : AB.second) {
         bsum += pow(b.getEdgeLen(),2);
     }
+#if 0 //temporary!
+    //                                    25  67  2567  34  234567
+    vector<unsigned> b_splits_in_order = {18, 96,  114, 12,    126};
+    for (auto & b : AB.second) {
+        unsigned long bvalue = b.getBits()[0];
+        bindex = 99;
+        for (unsigned z = 0; z < b_splits_in_order.size(); z++) {
+            if (bvalue == b_splits_in_order[z]) {
+                bindex = z;
+                break;
+            }
+        }
+        assert(bindex < 99);
+        bvect[bindex]._split = &b;
+        bvect[bindex]._weight = pow(b.getEdgeLen(),2)/bsum;
+    }
+#else
     for (auto & b : AB.second) {
         bvect[bindex]._split = &b;
-        bvect[bindex]._capacity = pow(b.getEdgeLen(),2)/bsum;
+        bvect[bindex]._weight = pow(b.getEdgeLen(),2)/bsum;
         bindex++;
     }
+#endif
 
     // Create the incompatibility graph
-    // A vertices go on the left, B vertices go on the right, and a
-    // line connects an A vertex to a B vertex only if the two vertices are incompatible
-    edgemap_t edgemap;
+    // A vertices go on the left, B vertices go on the right, and edges connect an A vertex
+    // to a B vertex only if the two vertices are incompatible.
+    vector<OPEdge> all_edges;
+    all_edges.reserve(avect.size() * bvect.size() + avect.size() + bvect.size());
+    unsigned nincompatibilities = 0;
     auto asize = static_cast<unsigned>(avect.size());
     auto bsize = static_cast<unsigned>(bvect.size());
+
+    // Create edges from source to the A-vertices
+    OPVertex source;
+    source._name = "source";
     for (unsigned i = 0; i < asize; i++) {
+        // Assign a name to avect[i]
+        avect[i]._name = str(format("a%d") % i);
+
+        // //temporary!
+        // cerr << "avect[" << i << "] split: \n";
+        // for (auto v : avect[i]._split->getBits()) {
+        //     cerr << " " << v << endl;
+        // }
+
+        // Create the forward edge
+        all_edges.emplace_back();
+        OPEdge & source_forward_edge = all_edges.back();
+        source_forward_edge._from = &source;
+        source_forward_edge._to = &avect[i];
+        source_forward_edge._capacity = avect[i]._weight;
+        source_forward_edge._flow = 0.0;
+        source_forward_edge._reverse_flow = 0.0;
+        source_forward_edge._open = true;
+        source._edges.push_back(&source_forward_edge);
+    }
+
+    // Create edges from A-vertices to B-vertices
+    for (unsigned i = 0; i < asize; i++) {
+        // Get split associated with avect[i]
+        const Split * a = avect[i]._split;
+        assert(a);
         for (unsigned j = 0; j < bsize; j++) {
-            const Split * a = avect[i]._split;
-            assert(a);
+            // Get split associated with bvect[j]
             const Split * b = bvect[j]._split;
             assert(b);
             if (!a->compatibleWith(*b)) {
-                // Create an edge in the incompatibility graph
-                avect[i]._children.push_back(&bvect[j]);
-                auto abpair = make_pair(&avect[i], &bvect[j]);
-                edgemap[abpair] = 0.0;
+                nincompatibilities++;
+
+                // Create a forward edge in the incompatibility graph
+                all_edges.emplace_back();
+                OPEdge & forward_edge = all_edges.back();
+                forward_edge._from = &avect[i];
+                forward_edge._to = &bvect[j];
+                forward_edge._capacity = 1.0;
+                forward_edge._flow = 0.0;
+                forward_edge._reverse_flow = 0.0;
+                forward_edge._open = true;
+                avect[i]._edges.emplace_back(&forward_edge);
             }
         }
     }
-    auto nincompatible = static_cast<unsigned>(edgemap.size());
+
+    // Create edges from the B-vertices to the sink
+    OPVertex sink;
+    sink._name = "sink";
+    for (unsigned j = 0; j < bsize; j++) {
+        // Assign a name to bvect[j]
+        bvect[j]._name = str(format("b%d") % j);
+
+        // //temporary!
+        // cerr << "bvect[" << j << "] split: \n";
+        // for (auto v : bvect[j]._split->getBits()) {
+        //     cerr << " " << v << endl;
+        // }
+
+        // Create the forward edge
+        all_edges.emplace_back();
+        OPEdge & sink_forward_edge = all_edges.back();
+        sink_forward_edge._from = &bvect[j];
+        sink_forward_edge._to = &sink;
+        sink_forward_edge._capacity = bvect[j]._weight;
+        sink_forward_edge._flow = 0.0;
+        sink_forward_edge._reverse_flow = 0.0;
+        sink_forward_edge._open = true;
+        bvect[j]._edges.emplace_back(&sink_forward_edge);
+    }
 
     bool success = false;
-    if (nincompatible < asize*bsize) {
+    if (nincompatibilities < asize*bsize) {
         // At least one independent pair of vertices exists
         // Carry out Edmonds-Karp algorithm to find min-weight vertex cover (identifies max weight independent set)
         // In Owens-Provan terminology,
@@ -687,7 +1123,7 @@ inline bool OP::opRefineSupport(const Split::treeid_pair_t & AB, Split::treeid_p
         //   ||A1||/(||A1|| + ||B1||)
         // The point at which A2 edges become 0 is
         //   ||A2||/(||A2|| + ||B2||)
-        opEdmondsKarp(avect, bvect, edgemap, AB1.first, AB2.first, AB1.second, AB2.second, _quiet);
+        opEdmondsKarp(source, sink, avect, bvect, AB1.first, AB2.first, AB1.second, AB2.second, _quiet);
 
         // if (!quiet) {
         //     cout << "\nResults:" << endl;
