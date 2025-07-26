@@ -117,7 +117,7 @@ inline double Split::getEdgeLen() const {
 inline void Split::setBitAt(unsigned leaf_index) {
     unsigned unit_index = leaf_index/_bits_per_unit;
     unsigned bit_index = leaf_index - unit_index*_bits_per_unit;
-    split_unit_t bit_to_set = 1 << bit_index;
+    split_unit_t bit_to_set = (split_unit_t)1 << bit_index;
     _bits[unit_index] |= bit_to_set;
     }
 
