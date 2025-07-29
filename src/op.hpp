@@ -1,14 +1,5 @@
 #pragma once
 
-#include <iostream>
-#include <numeric>
-
-#include "opvertex.hpp"
-#include "tree_summary.hpp"
-#include <boost/format.hpp>
-#include <boost/program_options.hpp>
-#include <boost/exception/all.hpp> // Include for boost::exception
-
 using namespace std;
 using namespace boost;
 
@@ -21,12 +12,17 @@ public:
 
     void                clear();
     void                processCommandLineOptions(int argc, const char * argv[]);
-    double              calcBHVDistance(unsigned ref_index, unsigned test_index) const;
-    double              calcKFDistance(unsigned ref_index, unsigned test_index) const;
     void                run();
 
 private:
 
+    void buildTree(unsigned tree_index, TreeManip & tm) const;
+    double calcBHVDistance(TreeManip & starttm, TreeManip & endtm, vector<Split::treeid_pair_t> & ABpairs) const;
+    double calcKFDistance(unsigned ref_index, unsigned test_index) const;
+    void chooseRandomTree(TreeManip & tm, Lot & lot) const;
+    void displaceTreeAlongGeodesic(TreeManip & starttree, TreeManip & endtree, double displacement) const;
+    bool frechetCloseEnough(vector<TreeManip> & mu, unsigned lower, unsigned upper, double epsilon) const;
+    void computeFrechetMean(TreeManip & meantree) const;
     static double opCalcTreeIDLength(
         const Split::treeid_t & splits);
     double opCalcLeafContribution(
@@ -79,7 +75,9 @@ private:
 
         bool                    _quiet;
         bool                    _output_for_gtp;
+        bool                    _frechet_mean;
         unsigned                _precision;
+        unsigned                _rnseed;
         string                  _tree_file_name;
         string                  _distance_measure;
         TreeSummary::SharedPtr  _tree_summary;
@@ -104,10 +102,12 @@ inline OP::~OP() = default;
 inline void OP::clear() {
     _quiet = true;
     _output_for_gtp = false;
+    _frechet_mean = false;
     _tree_file_name = "";
     _distance_measure = "geodesic";
     _tree_summary   = nullptr;
     _precision = 9;
+    _rnseed = 1;
 }
 
 inline void OP::processCommandLineOptions(int argc, const char * argv[]) {
@@ -119,8 +119,10 @@ inline void OP::processCommandLineOptions(int argc, const char * argv[]) {
         ("treefile,t",  program_options::value(&_tree_file_name)->required(), "name of data file in NEXUS format (required, no default)")
         ("dist", program_options::value(&_distance_measure), "specify either kf or geodesic (default: geodesic)")
         ("precision", program_options::value(&_precision)->default_value(9), "number of digits precision to use in outputting distances (default: 9)")
+        ("frechet", program_options::value(&_frechet_mean)->default_value(false), "compute Frechet mean tree using Sturm's algorithm and geodesic distances")
         ("gtptest", program_options::value(&_output_for_gtp)->default_value(false), "output treefile that can be read by Owens-Provan GTP program")
         ("quiet,q", program_options::value(&_quiet), "suppress all output except for errors (default: yes)")
+        ("rnseed", program_options::value(&_rnseed), "pseudorandom number generator seed (used only when estimating mean tree)")
         ;
     program_options::store(program_options::parse_command_line(argc, argv, desc), vm);
     try {
@@ -1266,24 +1268,18 @@ inline double OP::opCalcGeodesicDist(vector<Split::treeid_pair_t> & ABpairs) con
     return geodesic_distance;
 }
 
-inline double OP::calcBHVDistance(unsigned ref_index, unsigned test_index) const {
-    // Get the reference tree
-    string ref_newick = _tree_summary->getNewick(ref_index);
-    bool ref_isrooted = _tree_summary->isRooted(ref_index);
+inline void OP::buildTree(unsigned tree_index, TreeManip & tm) const {
+    string newick = _tree_summary->getNewick(tree_index);
 
-    // Get the test tree
-    string test_newick = _tree_summary->getNewick(test_index);
-    bool test_isrooted = _tree_summary->isRooted(ref_index);
-
-    // Ensure both trees are rooted
-    if (!ref_isrooted || !test_isrooted) {
+    bool isrooted = _tree_summary->isRooted(tree_index);
+    if (!isrooted) {
         throw Xop("Trees must be rooted in this version");
     }
+    tm.buildFromNewick(newick, /*rooted*/isrooted, /*allow_polytomies*/true);
+}
 
-    // Build the reference tree
-    TreeManip starttm;
-    starttm.buildFromNewick(ref_newick, /*rooted*/ref_isrooted, /*allow_polytomies*/true);
-    //TODO: get rooted status from treeManip object
+inline double OP::calcBHVDistance(TreeManip & starttm, TreeManip & endtm, vector<Split::treeid_pair_t> & ABpairs) const {
+    ABpairs.clear();
 
     // Store splits from the reference tree
     Split::treeid_t A0;
@@ -1304,10 +1300,6 @@ inline double OP::calcBHVDistance(unsigned ref_index, unsigned test_index) const
             cout << "  " << a.createPatternRepresentation(true) << endl;
         }
     }
-
-    // Build the test tree
-    TreeManip endtm;
-    endtm.buildFromNewick(test_newick, /*rooted*/test_isrooted, /*allow_polytomies*/true);
 
     // Store splits from the reference tree
     Split::treeid_t B0;
@@ -1360,7 +1352,6 @@ inline double OP::calcBHVDistance(unsigned ref_index, unsigned test_index) const
         if (!_quiet)
             cout << str(format("\nTree pair %d (of %d)") % pair_index % in_pairs.size()) << endl;
 
-        vector<Split::treeid_pair_t> ABpairs;
         ABpairs.push_back(inpair);
 
         if (!_quiet) {
@@ -1513,6 +1504,113 @@ for (const auto& p : leafmap0) {
     return KLdist;
 }
 
+inline void OP::chooseRandomTree(TreeManip & tm, Lot & lot) const {
+    unsigned n = _tree_summary->getNumTrees();
+    unsigned index = lot.randint(0, n-1);
+    string newick = _tree_summary->getNewick(index);
+    bool rooted = _tree_summary->isRooted(index);
+    assert(rooted);
+    tm.buildFromNewick(newick, rooted, /*allow_polytomies*/true);
+}
+
+inline void OP::displaceTreeAlongGeodesic(TreeManip & starttree, TreeManip & endtree, double displacement) const {
+    // Move starttree a distance displacement along the geodesic from starttree to endtree
+    // First, get geodesic
+    vector<Split::treeid_pair_t> ABpairs;
+    double geodesic = calcBHVDistance(starttree, endtree, ABpairs);
+
+    // Support A = (A1, A2, ..., Ak) and B = (B1, B2, ..., Bk)
+    // Path has i-1,2,...,k "legs"
+    //    G0 if lambda/(1-lambda) <= length(A1)/length(B1)
+    //    Gi if length(Ai)/length(Bi) = lambda/(1-lambda) <= length(Ai+1)/length(Bi+1)
+    //    Gk if length(Ak)/length(Bk) <= lambda/(1-lambda)
+    // and tree Ti along path has edge sets
+    //    B1 U ... U Bi U Ai+1 U ... U Ak
+    // and edge sets
+    //    length edge e in Ti = [(1-lambda) length(Aj) - lambda length(Bj)]/length(Aj) if e in Aj
+    //    length edge e in Ti = [lambda length(Bj) - (1-lambda) length(Aj)]/length(Bj) if e in Bj
+
+    // Precalculate lengths of all segments
+    auto support_size = (unsigned)ABpairs.size();
+    vector<double> lenA(support_size);
+    vector<double> lenB(support_size);
+    for (unsigned i = 0; i < support_size; ++i) {
+        lenA[i] = opCalcTreeIDLength(ABpairs[i].first);
+        lenB[i] = opCalcTreeIDLength(ABpairs[i].second);
+    }
+
+    // First step is to determine the leg
+    double lambda_ratio = displacement/(1.0 - displacement);
+    unsigned leg = 0;
+    double ratioi = lenA[0]/lenB[0];
+    if (lambda_ratio > ratioi) {
+        for (unsigned iplus1 = 1; iplus1 < ABpairs.size(); ++iplus1) {
+            double ratioiplus1 = lenA[iplus1]/lenB[iplus1];
+            if (lambda_ratio >= ratioi && lambda_ratio <= ratioiplus1) {
+                leg = iplus1 - 1;
+                break;
+            }
+        }
+    }
+
+    // Walk down ABpairs, dropping and adding splits as needed from starttree until we arrive at the destination leg
+    double lambda = displacement;
+    Split::treeid_t splitset;
+    for (unsigned i = 0; i <= leg; ++i) {
+        double edgelen_multiplicative_factor = (lambda*lenB[i] - (1.0 - lambda)*lenA[i])/lenB[i];
+        for (auto & asplit : ABpairs[i].first) {
+            // Drop asplit from starttree
+            starttree.dropSplit(asplit);
+        }
+        for (auto & bsplit : ABpairs[i].second) {
+            // Add bsplit to starttree
+            double edgelen = bsplit.getEdgeLen();
+            edgelen *= edgelen_multiplicative_factor;
+            starttree.addSplit(bsplit, edgelen);
+        }
+    }
+}
+
+inline bool OP::frechetCloseEnough(vector<TreeManip> & mu, unsigned lower, unsigned upper, double epsilon) const {
+    // Compute pairwise distances between trees in mu with index > lower and index <= upper and return
+    // true iff all pairwise distances are less than epsilon
+    bool is_close_enough = true;
+    vector<Split::treeid_pair_t> ABpairs;
+    assert(lower < upper);
+    assert (upper < mu.size());
+    for (unsigned i = lower; i < upper - 1; ++i) {
+        for (unsigned j = i+1; j < upper; ++j) {
+            double bhvdist = calcBHVDistance(mu[i], mu[j], ABpairs);
+            if (bhvdist > epsilon) {
+                is_close_enough = false;
+                break;
+            }
+        }
+    }
+    return is_close_enough;
+}
+
+inline void OP::computeFrechetMean(TreeManip & meantree) const {
+    double   epsilon = 0.001; // successive mean estimates must be at least this close to stop iterating
+    unsigned       N = 5;     // number of previous mean estimates that must be as close as epsilon
+    unsigned       K = 100;   // maximum number of iterations
+    unsigned k = 1;           // keeps track of iterations
+    vector<TreeManip> mu(k);  // the trail of estimated mean trees (always has length k)
+    Lot lot;
+    lot.setSeed(_rnseed);
+    chooseRandomTree(mu[k], lot);
+    bool close_enough = false;
+    while (k < K || close_enough) {
+        mu.emplace_back();
+        chooseRandomTree(mu[k+1], lot);
+        displaceTreeAlongGeodesic(mu[k+1], mu[k], 1.0/(k+1));
+        ++k;
+        if (k >= N)
+            close_enough = frechetCloseEnough(mu, k-N, k, epsilon);
+        }
+    meantree.setTree(mu[k].getTree());
+}
+
 inline void OP::run() {
     try {
         // Read in trees
@@ -1523,7 +1621,22 @@ inline void OP::run() {
             throw Xop("Must input at least 2 trees to compute tree distances");
         }
 
+        //temporary!
+        TreeManip starttm;
+        buildTree(0, starttm);
+        cerr << "start: " << starttm.makeNewick(5) << endl;
+        TreeManip endtm;
+        buildTree(1, endtm);
+        cerr << "end: " << starttm.makeNewick(5) << endl;
+        displaceTreeAlongGeodesic(starttm, endtm, 1.0);
+        cerr << starttm.makeNewick(5) << endl;
+        cerr << "start moved to end: " << starttm.makeNewick(5) << endl;
+        exit(0);
+
         if (_output_for_gtp) {
+            if (!_quiet)
+                cout << "Writing trees in newick format to file \"trees-for-gtp.txt\"" << endl;
+
             ofstream gtpf("trees-for-gtp.txt");
             for (unsigned i = 0; i < ntrees; ++i) {
                 gtpf << _tree_summary->getNewick(i) << ";\n";
@@ -1532,6 +1645,24 @@ inline void OP::run() {
 
             // If output for gtp was requested, then that is all
             // we try to do on this run
+            if (!_quiet)
+                cout << "Done." << endl;
+            return;
+        }
+
+        if (_frechet_mean) {
+            TreeManip meantree;
+            if (!_quiet)
+                cout << "Computing Frechet mean tree..." << endl;
+            computeFrechetMean(meantree);
+
+            if (!_quiet) {
+                cout << "Mean tree:" << endl;
+                cout << meantree.makeNewick(9) << endl;
+            }
+
+            if (!_quiet)
+                cout << "Done." << endl;
             return;
         }
 
@@ -1540,8 +1671,13 @@ inline void OP::run() {
                 cout << "Writing geodesic distances to file \"bhvdists.txt\"" << endl;
             ofstream outf("bhvdists.txt");
             outf << "tree	distance to tree 1" << endl;
+            TreeManip starttm;
+            buildTree(0, starttm);
             for (unsigned i = 1; i < ntrees; i++) {
-                double bhvdist = calcBHVDistance(0, i);
+                TreeManip endtm;
+                buildTree(i, endtm);
+                vector<Split::treeid_pair_t> ABpairs;
+                double bhvdist = calcBHVDistance(starttm, endtm, ABpairs);
                 outf << (i+1) << '\t' << setprecision(static_cast<int>(_precision)) << bhvdist << '\n';
             }
             outf.close();
@@ -1564,4 +1700,4 @@ inline void OP::run() {
         }
 }
 
-} // namespace strom
+} // namespace op

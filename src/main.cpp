@@ -1,8 +1,30 @@
-#include <iostream>
-
 // Uncomment the line below to save incompatibility graphs as dot files for debugging purposes
 //#define OP_SAVE_DOT_FILE
 
+#include <string>
+#include <vector>
+#include <iostream>
+#include <numeric>
+
+using namespace std;
+
+#include <boost/format.hpp>
+#include <boost/program_options.hpp>
+#include <boost/exception/all.hpp> // Include for boost::exception
+#include <boost/random/gamma_distribution.hpp>
+#include <boost/random/mersenne_twister.hpp>
+#include <boost/random/normal_distribution.hpp>
+#include <boost/random/uniform_real.hpp>
+#include <boost/random/variate_generator.hpp>
+
+#include "split.hpp"
+#include "node.hpp"
+#include "tree.hpp"
+#include "tree_manip.hpp"
+#include "tree_summary.hpp"
+#include "opvertex.hpp"
+#include "xop.hpp"
+#include "lot.hpp"
 #include "op.hpp"
 
 using namespace op;

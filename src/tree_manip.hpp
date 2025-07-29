@@ -21,6 +21,8 @@ namespace op {
         TreeManip(Tree::SharedPtr t);
         ~TreeManip();
 
+
+
         void                        createLeafNodeMap(map<string, Node *> & leafmap);
         Node *                      getNodeWithSplit(Split & s);
 
@@ -31,10 +33,13 @@ namespace op {
         void                        createTestTree();
         void                        clear();
 
-        string                 makeNewick(unsigned precision) const;
+        string                      makeNewick(unsigned precision) const;
         void                        buildFromNewick(const string newick, bool rooted, bool allow_polytomies);
         void                        storeSplits(set<Split> & internal_splits, set<Split> & leaf_splits);
         void                        rerootAt(int node_index);
+
+        void                        dropSplit(const Split & s);
+        void                        addSplit(const Split & s, double edgelen);
 
     private:
 
@@ -961,10 +966,10 @@ namespace op {
             nd->_split.setEdgeLen(nd->_edge_length);
 
             if (nd->_left_child) {
-                // add this internal node's split to splitset
                 if (nd != _tree->_root->_left_child) {
                     internal_splits.insert(nd->_split);
                 }
+                // add this internal node's split to splitset
             }
             else {
                 // set bit corresponding to this leaf node's number
@@ -978,4 +983,88 @@ namespace op {
             }
         }
     }
+
+    inline void TreeManip::dropSplit(const Split & s) {
+        // Locate node having split s
+        auto it = find_if(_tree->_preorder.begin(), _tree->_preorder.end(),[s](Node * nd){return nd->_split == s;});
+        assert(it != _tree->_preorder.end());
+        Node * nd = *it;
+
+        // Make each of nd's children a child of nd->_parent
+        Node * par = nd->_parent;
+        assert(par);
+        stack<Node *> child_pile;
+        for (Node * child = nd->_left_child; child; child = child->_right_sib) {
+            child_pile.push(child);
+        }
+        nd->_left_child = nullptr;
+        while (!child_pile.empty()) {
+            // Remove child from stack
+            Node * child = child_pile.top();
+            child_pile.pop();
+
+            // Attach child to par
+            child->_right_sib = par->_left_child;
+            par->_left_child = child;
+            child->_parent = par;
+        }
+
+        // Now we can drop nd
+        Node * par_child = par->_left_child;
+        assert(par_child);
+        if (par_child == nd) {
+            // nd is its parent's left child
+            par->_left_child = nd->_right_sib;
+        }
+        else {
+            // nd is not its parent's left child
+            while (par_child->_right_sib != nd) {
+                par_child = par_child->_right_sib;
+            }
+            assert(par_child);
+            par_child->_right_sib = nd->_right_sib;
+        }
+        nd->clear();
+    }
+
+    inline void TreeManip::addSplit(const Split & s, double edgelen) {
+        // Find first node not currently in use
+        Node * newnd = nullptr;
+        for (unsigned i = 0; i < _tree->_nleaves; i++) {
+            Node * nd = &_tree->_nodes[i];
+            if (nd->_left_child == nullptr && nd->_right_sib == nullptr && nd->_parent == nullptr) {
+                newnd = nd;
+            }
+        }
+
+        // If unused is empty, we will not be able to add any splits
+        assert (newnd != nullptr);
+
+        // Find first node in postorder sequence that contains s
+        for (auto nd : adaptors::reverse(_tree->_preorder)) {
+            Split & ndsplit = nd->_split;
+            if (s.subsumedIn(ndsplit)) {
+                // Add all taxa in s to a new node and detach them from nd
+                for (Node * child = nd->_left_child; child; child = child->_right_sib) {
+                    Split & childsplit = child->_split;
+                    if (childsplit.subsumedIn(s)) {
+                        // Move child to newnd
+                        Node * oldlchild = newnd->_left_child;
+                        newnd->_left_child = child;
+                        child->_parent = newnd;
+                        child->_right_sib = oldlchild;
+                    }
+                }
+
+                // Make newnd a child of nd
+                Node * oldndlchild = nd->_left_child;
+                nd->_left_child = newnd;
+                newnd->_right_sib = oldndlchild;
+                newnd->_parent = nd;
+                newnd->setEdgeLength((edgelen));
+                break;
+            }
+        }
+    }
+
 }

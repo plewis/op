@@ -1,20 +1,14 @@
 #pragma once
 
-#include <string>
-#include <vector>
-#include  <iostream>
-#include "split.hpp"
-
 namespace op
-    {
+{
 
     class Tree;
     class TreeManip;
     class Likelihood;
     //class Updater;
 
-    class Node
-        {
+    class Node {
             friend class Tree;
             friend class TreeManip;
             friend class Likelihood;
@@ -50,33 +44,29 @@ namespace op
             string         _name;
             double              _edge_length;
             Split               _split;
-        };
+    };
 
-    inline Node::Node()
-        {
+    inline Node::Node() {
         //cout << "Creating Node object" << endl;
         clear();
-        }
+    }
 
-    inline Node::~Node()
-        {
+    inline Node::~Node() {
         //cout << "Destroying Node object" << endl;
-        }
+    }
 
-    inline void Node::clear()
-        {
-        _left_child = 0;
-        _right_sib = 0;
-        _parent = 0;
+    inline void Node::clear() {
+        _left_child = nullptr;
+        _right_sib = nullptr;
+        _parent = nullptr;
         _number = 0;
         _name = "";
         _edge_length = _smallest_edge_length;
-        }
-
-    inline void Node::setEdgeLength(double v)
-        {
-        _edge_length = (v < _smallest_edge_length ? _smallest_edge_length : v);
-        }
-
     }
+
+    inline void Node::setEdgeLength(double v) {
+        _edge_length = (v < _smallest_edge_length ? _smallest_edge_length : v);
+    }
+
+}
 
