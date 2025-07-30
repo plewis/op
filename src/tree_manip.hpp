@@ -33,13 +33,14 @@ namespace op {
         void                        createTestTree();
         void                        clear();
 
-        string                      makeNewick(unsigned precision) const;
+        string                      makeNewick(unsigned precision, bool use_names = false) const;
         void                        buildFromNewick(const string newick, bool rooted, bool allow_polytomies);
         void                        storeSplits(set<Split> & internal_splits, set<Split> & leaf_splits);
         void                        rerootAt(int node_index);
 
         void                        dropSplit(const Split & s);
         void                        addSplit(const Split & s, double edgelen);
+        void                        debugCheckSplits() const;
 
     private:
 
@@ -223,10 +224,11 @@ namespace op {
         _tree->_levelorder.push_back(second_leaf);
     }
 
-    inline string TreeManip::makeNewick(unsigned precision) const
+    inline string TreeManip::makeNewick(unsigned precision, bool use_names) const
     {
         string newick;
         const format tip_node_format( str(format("%%d:%%.%df") % precision) );
+        const format tip_node_format_using_names( str(format("%%s:%%.%df") % precision) );
         const format internal_node_format( str(format("):%%.%df") % precision) );
         stack<Node *> node_stack;
 
@@ -237,16 +239,21 @@ namespace op {
             {
                 newick += "(";
                 node_stack.push(nd);
-                if (root_tip)
-                {
-                    newick += str(format(tip_node_format) % (root_tip->_number + 1) % nd->_edge_length);
+                if (root_tip) {
+                    if (use_names)
+                        newick += str(format(tip_node_format_using_names) % "root" % nd->_edge_length);
+                    else
+                        newick += str(format(tip_node_format) % (root_tip->_number + 1) % nd->_edge_length);
                     newick += ",";
                     root_tip = 0;
                 }
             }
             else
             {
-                newick += str(format(tip_node_format) % (nd->_number + 1) % nd->_edge_length);
+                if (use_names)
+                    newick += str(format(tip_node_format_using_names) % nd->_name % nd->_edge_length);
+                else
+                    newick += str(format(tip_node_format) % (nd->_number + 1) % nd->_edge_length);
                 if (nd->_right_sib)
                     newick += ",";
                 else
@@ -351,6 +358,14 @@ namespace op {
     {
         regex commentexpr("\\[.*?\\]");
         newick = regex_replace(newick, commentexpr, string(""));
+    }
+
+    inline void TreeManip::debugCheckSplits() const {
+        cerr << "debugCheckSplits: postorder traversal of tree..." << endl;
+        for (auto nd : adaptors::reverse(_tree->_preorder)) {
+            cerr << "  split = " << nd->_split.createPatternRepresentation() << "  number = " << nd->_number << "  name = \"" << nd->_name << "\"" << endl;
+        }
+        cerr << endl;
     }
 
     inline void TreeManip::refreshPreorder()
@@ -1024,16 +1039,27 @@ namespace op {
             assert(par_child);
             par_child->_right_sib = nd->_right_sib;
         }
-        nd->clear();
+
+        // Clear everything except node number and name
+        nd->_left_child = nullptr;
+        nd->_right_sib = nullptr;
+        nd->_parent = nullptr;
+        nd->_edge_length = Node::_smallest_edge_length;
+        nd->_split.clear();
+
+        refreshPreorder();
+        refreshLevelorder();
+        debugCheckSplits();
     }
 
     inline void TreeManip::addSplit(const Split & s, double edgelen) {
         // Find first node not currently in use
         Node * newnd = nullptr;
-        for (unsigned i = 0; i < _tree->_nleaves; i++) {
+        for (unsigned i = 0; i < _tree->_nodes.size(); i++) {
             Node * nd = &_tree->_nodes[i];
             if (nd->_left_child == nullptr && nd->_right_sib == nullptr && nd->_parent == nullptr) {
                 newnd = nd;
+                break;
             }
         }
 
@@ -1044,11 +1070,25 @@ namespace op {
         for (auto nd : adaptors::reverse(_tree->_preorder)) {
             Split & ndsplit = nd->_split;
             if (s.subsumedIn(ndsplit)) {
-                // Add all taxa in s to a new node and detach them from nd
+                // Add all nodes subsumed in s to a new node and detach them from nd
+                stack<Node *> child_pile;
                 for (Node * child = nd->_left_child; child; child = child->_right_sib) {
+                    child_pile.push(child);
+                }
+                while (!child_pile.empty()) {
+                    // Remove child from stack
+                    Node * child = child_pile.top();
+                    child_pile.pop();
                     Split & childsplit = child->_split;
                     if (childsplit.subsumedIn(s)) {
                         // Move child to newnd
+                        Node * left_sib = (child_pile.empty() ? nullptr : child_pile.top());
+                        if (left_sib) {
+                            left_sib->_right_sib = child->_right_sib;
+                        }
+                        else {
+                            nd->_left_child = child->_right_sib;
+                        }
                         Node * oldlchild = newnd->_left_child;
                         newnd->_left_child = child;
                         child->_parent = newnd;
@@ -1062,9 +1102,13 @@ namespace op {
                 newnd->_right_sib = oldndlchild;
                 newnd->_parent = nd;
                 newnd->setEdgeLength((edgelen));
+                newnd->_split = s;
                 break;
             }
         }
+        refreshPreorder();
+        refreshLevelorder();
+        debugCheckSplits();
     }
 
 }

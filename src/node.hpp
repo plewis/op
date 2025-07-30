@@ -22,7 +22,7 @@ namespace op
                     Node *              getLeftChild()  {return _left_child;}
                     Node *              getRightSib()   {return _right_sib;}
                     int                 getNumber()     {return _number;}
-                    string         getName()       {return _name;}
+                    string              getName()       {return _name;}
                     Split               getSplit()      {return _split;}
 
                     double              getEdgeLength() {return _edge_length;}
@@ -41,7 +41,7 @@ namespace op
             Node *              _right_sib;
             Node *              _parent;
             int                 _number;
-            string         _name;
+            string              _name;
             double              _edge_length;
             Split               _split;
     };
@@ -62,6 +62,7 @@ namespace op
         _number = 0;
         _name = "";
         _edge_length = _smallest_edge_length;
+        _split.clear();
     }
 
     inline void Node::setEdgeLength(double v) {

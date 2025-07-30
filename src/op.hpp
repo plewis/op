@@ -1542,14 +1542,12 @@ inline void OP::displaceTreeAlongGeodesic(TreeManip & starttree, TreeManip & end
     // First step is to determine the leg
     double lambda_ratio = displacement/(1.0 - displacement);
     unsigned leg = 0;
-    double ratioi = lenA[0]/lenB[0];
-    if (lambda_ratio > ratioi) {
-        for (unsigned iplus1 = 1; iplus1 < ABpairs.size(); ++iplus1) {
-            double ratioiplus1 = lenA[iplus1]/lenB[iplus1];
-            if (lambda_ratio >= ratioi && lambda_ratio <= ratioiplus1) {
-                leg = iplus1 - 1;
-                break;
-            }
+    double ratioi = lenA[leg]/lenB[leg];
+    while (lambda_ratio > ratioi && leg < support_size) {
+        leg++;
+        ratioi = lenA[leg]/lenB[leg];
+        if (lambda_ratio <= ratioi) {
+            break;
         }
     }
 
@@ -1560,13 +1558,17 @@ inline void OP::displaceTreeAlongGeodesic(TreeManip & starttree, TreeManip & end
         double edgelen_multiplicative_factor = (lambda*lenB[i] - (1.0 - lambda)*lenA[i])/lenB[i];
         for (auto & asplit : ABpairs[i].first) {
             // Drop asplit from starttree
+            cout << "  Dropping split " << asplit.createPatternRepresentation() << endl;
             starttree.dropSplit(asplit);
+            cout << "  tree now: " << starttree.makeNewick(5, true) << endl;
         }
         for (auto & bsplit : ABpairs[i].second) {
             // Add bsplit to starttree
+            cout << "  Adding split " << bsplit.createPatternRepresentation() << endl;
             double edgelen = bsplit.getEdgeLen();
             edgelen *= edgelen_multiplicative_factor;
             starttree.addSplit(bsplit, edgelen);
+            cout << "  tree now: " << starttree.makeNewick(5, true) << endl;
         }
     }
 }
@@ -1622,15 +1624,23 @@ inline void OP::run() {
         }
 
         //temporary!
+        Split::treeid_t internalsplits;
+        Split::treeid_t leafsplits;
         TreeManip starttm;
         buildTree(0, starttm);
-        cerr << "start: " << starttm.makeNewick(5) << endl;
+        starttm.storeSplits(internalsplits, leafsplits);
+        cerr << "start: " << starttm.makeNewick(5, true) << endl;
+        starttm.debugCheckSplits();
+
         TreeManip endtm;
         buildTree(1, endtm);
-        cerr << "end: " << starttm.makeNewick(5) << endl;
-        displaceTreeAlongGeodesic(starttm, endtm, 1.0);
+        endtm.storeSplits(internalsplits, leafsplits);
+        cerr << "end: " << endtm.makeNewick(5, true) << endl;
+        endtm.debugCheckSplits();
+
+        displaceTreeAlongGeodesic(starttm, endtm, 0.5);
         cerr << starttm.makeNewick(5) << endl;
-        cerr << "start moved to end: " << starttm.makeNewick(5) << endl;
+        cerr << "start moved to end: " << starttm.makeNewick(5, true) << endl;
         exit(0);
 
         if (_output_for_gtp) {
