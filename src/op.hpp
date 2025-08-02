@@ -17,7 +17,11 @@ public:
 private:
 
     void buildTree(unsigned tree_index, TreeManip & tm) const;
-    double calcBHVDistance(TreeManip & starttm, TreeManip & endtm, vector<Split::treeid_pair_t> & ABpairs) const;
+    double calcBHVDistance(
+        TreeManip & starttm,
+        TreeManip & endtm,
+        vector<Split::treeid_pair_t> & ABpairs,
+        vector<Split::split_pair_t> & commonPairs) const;
     double calcKFDistance(unsigned ref_index, unsigned test_index) const;
     void chooseRandomTree(TreeManip & tm, Lot & lot) const;
     void displaceTreeAlongGeodesic(TreeManip & starttree, TreeManip & endtree, double displacement) const;
@@ -27,11 +31,12 @@ private:
         const Split::treeid_t & splits);
     double opCalcLeafContribution(
         const Split::treeid_t & Alvs,
-        const Split::treeid_t & Blvs) const;
+        const Split::treeid_t & Blvs,
+        vector<Split::split_pair_t> & commonPairs) const;
     double opFindCommonEdges(
         const Split::treeid_t & A,
         const Split::treeid_t & B,
-        vector<Split> & common_edges) const;
+        vector<Split::split_pair_t> & common_edges) const;
     void opSplitAtCommonEdges(
         const vector<Split> & common_edges,
         vector<pair<Split::treeid_t,Split::treeid_t> > & in_pairs) const;
@@ -81,6 +86,7 @@ private:
         string                  _tree_file_name;
         string                  _distance_measure;
         TreeSummary::SharedPtr  _tree_summary;
+        vector<string>          _taxon_labels;
 
         static string           _program_name;
         static unsigned         _major_version;
@@ -108,6 +114,7 @@ inline void OP::clear() {
     _tree_summary   = nullptr;
     _precision = 9;
     _rnseed = 1;
+    _taxon_labels.clear();
 }
 
 inline void OP::processCommandLineOptions(int argc, const char * argv[]) {
@@ -155,7 +162,10 @@ inline double OP::opCalcTreeIDLength(const Split::treeid_t & splits) {
     return sqrt(length);
 }
 
-inline double OP::opCalcLeafContribution(const Split::treeid_t & Alvs, const Split::treeid_t & Blvs) const {
+inline double OP::opCalcLeafContribution(
+            const Split::treeid_t & Alvs,
+            const Split::treeid_t & Blvs,
+            vector<Split::split_pair_t> & commonPairs) const {
     if (!_quiet) {
         cout << "Leaves from starting tree:" << endl;
         for (auto & a : Alvs) {
@@ -176,6 +186,7 @@ inline double OP::opCalcLeafContribution(const Split::treeid_t & Alvs, const Spl
         double leafa = it->getEdgeLen();
         double leafb = b.getEdgeLen();
         leaf_contribution_squared += pow(leafa-leafb, 2);
+        commonPairs.emplace_back(*it, b);
     }
 
     if (!_quiet)
@@ -183,8 +194,12 @@ inline double OP::opCalcLeafContribution(const Split::treeid_t & Alvs, const Spl
     return leaf_contribution_squared;
 }
 
-inline double OP::opFindCommonEdges(const Split::treeid_t & A, const Split::treeid_t & B, vector<Split> & common_edges) const {
+inline double OP::opFindCommonEdges(
+            const Split::treeid_t & A,
+            const Split::treeid_t & B,
+            vector<Split::split_pair_t> & commonPairs) const {
     // Find splits in the intersection of A and B
+    vector<Split> common_edges;
     set_intersection(
         A.begin(), A.end(),
         B.begin(), B.end(),
@@ -198,6 +213,7 @@ inline double OP::opFindCommonEdges(const Split::treeid_t & A, const Split::tree
         auto itB = find(B.begin(), B.end(), s);
         double edgeB = itB->getEdgeLen();
         common_edge_contribution_squared += pow(edgeA-edgeB, 2);
+        commonPairs.emplace_back(*itA, *itB);
     }
 
     // Count the number of splits in B compatible with each split in A (and vice versa)
@@ -220,6 +236,7 @@ inline double OP::opFindCommonEdges(const Split::treeid_t & A, const Split::tree
             if (find(common_edges.begin(), common_edges.end(), *apair.first) == common_edges.end()) {
                 common_edges.push_back(*apair.first);
                 common_edge_contribution_squared += pow(apair.first->getEdgeLen(), 2);
+                commonPairs.emplace_back(*(apair.first), Split());
             }
         }
     }
@@ -232,6 +249,7 @@ inline double OP::opFindCommonEdges(const Split::treeid_t & A, const Split::tree
             if (find(common_edges.begin(), common_edges.end(), *bpair.first) == common_edges.end()) {
                 common_edges.push_back(*bpair.first);
                 common_edge_contribution_squared += pow(bpair.first->getEdgeLen(), 2);
+                commonPairs.emplace_back(Split(), *(bpair.first));
             }
         }
     }
@@ -1276,9 +1294,14 @@ inline void OP::buildTree(unsigned tree_index, TreeManip & tm) const {
         throw Xop("Trees must be rooted in this version");
     }
     tm.buildFromNewick(newick, /*rooted*/isrooted, /*allow_polytomies*/true);
+    tm.setLeafNames(_taxon_labels);
 }
 
-inline double OP::calcBHVDistance(TreeManip & starttm, TreeManip & endtm, vector<Split::treeid_pair_t> & ABpairs) const {
+inline double OP::calcBHVDistance(
+        TreeManip & starttm,
+        TreeManip & endtm,
+        vector<Split::treeid_pair_t> & ABpairs,
+        vector<Split::split_pair_t> & commonPairs) const {
     ABpairs.clear();
 
     // Store splits from the reference tree
@@ -1321,30 +1344,23 @@ inline double OP::calcBHVDistance(TreeManip & starttm, TreeManip & endtm, vector
         }
     }
 
-    // Calculate the contribution of leaf edges to the geodesic
-    double leaf_contribution_squared = opCalcLeafContribution(Alvs, Blvs);
-
     // Find common edges and calculate the contribution of common edge lengths to the geodesic
-    vector<Split> common_edges;
-    double common_edge_contribution_squared = opFindCommonEdges(A, B, common_edges);
+    double common_edge_contribution_squared = opFindCommonEdges(A, B, commonPairs);
 
-#if 0
-    // Create a vector of paired subtrees by splitting at common edges
-    vector<pair<Split::treeid_t, Split::treeid_t> > in_pairs;
-    in_pairs.emplace_back(A,B);
-    if (!common_edges.empty())
-        opSplitAtCommonEdges(common_edges, in_pairs);
-#else
-    if (!common_edges.empty()) {
+    if (!commonPairs.empty()) {
         // Remove splits representing common edge from both A and B
-        for (auto & c : common_edges) {
-            A.erase(c);
-            B.erase(c);
+        for (auto & cpair : commonPairs) {
+            if (cpair.first.getSize() > 0)
+                A.erase(cpair.first);
+            if (cpair.second.getSize() > 0)
+                B.erase(cpair.second);
         }
     }
     vector<pair<Split::treeid_t, Split::treeid_t> > in_pairs;
     in_pairs.emplace_back(A,B);
-#endif
+
+    // Calculate the contribution of leaf edges to the geodesic
+    double leaf_contribution_squared = opCalcLeafContribution(Alvs, Blvs, commonPairs);
 
     unsigned pair_index = 1;
     vector<double> geodesic_distances;
@@ -1517,7 +1533,8 @@ inline void OP::displaceTreeAlongGeodesic(TreeManip & starttree, TreeManip & end
     // Move starttree a distance displacement along the geodesic from starttree to endtree
     // First, get geodesic
     vector<Split::treeid_pair_t> ABpairs;
-    double geodesic = calcBHVDistance(starttree, endtree, ABpairs);
+    vector<Split::split_pair_t> commonPairs;
+    double geodesic = calcBHVDistance(starttree, endtree, ABpairs, commonPairs);
 
     // Support A = (A1, A2, ..., Ak) and B = (B1, B2, ..., Bk)
     // Path has i-1,2,...,k "legs"
@@ -1539,37 +1556,79 @@ inline void OP::displaceTreeAlongGeodesic(TreeManip & starttree, TreeManip & end
         lenB[i] = opCalcTreeIDLength(ABpairs[i].second);
     }
 
-    // First step is to determine the leg
-    double lambda_ratio = displacement/(1.0 - displacement);
-    unsigned leg = 0;
-    double ratioi = lenA[leg]/lenB[leg];
-    while (lambda_ratio > ratioi && leg < support_size) {
-        leg++;
-        ratioi = lenA[leg]/lenB[leg];
-        if (lambda_ratio <= ratioi) {
-            break;
-        }
-    }
-
     // Walk down ABpairs, dropping and adding splits as needed from starttree until we arrive at the destination leg
     double lambda = displacement;
     Split::treeid_t splitset;
-    for (unsigned i = 0; i <= leg; ++i) {
-        double edgelen_multiplicative_factor = (lambda*lenB[i] - (1.0 - lambda)*lenA[i])/lenB[i];
-        for (auto & asplit : ABpairs[i].first) {
+    //double lambda_ratio = displacement/(1.0 - displacement);
+    unsigned leg = 0;
+    while (true) {
+        double lambda_leg = 1.0;
+        if (leg < support_size) {
+            double ratio_leg = lenA[leg]/lenB[leg];
+            lambda_leg = ratio_leg/(1.0 + ratio_leg);
+        }
+        if (lambda <= lambda_leg) {
+            break;
+        }
+        for (auto & asplit : ABpairs[leg].first) {
             // Drop asplit from starttree
-            cout << "  Dropping split " << asplit.createPatternRepresentation() << endl;
+            // //temporary!
+            // cout << "  Dropping split " << asplit.createPatternRepresentation() << endl;
             starttree.dropSplit(asplit);
-            cout << "  tree now: " << starttree.makeNewick(5, true) << endl;
+            // //temporary!
+            // cout << "  tree now: " << starttree.makeNewick(5, true) << endl;
         }
-        for (auto & bsplit : ABpairs[i].second) {
+        for (auto & bsplit : ABpairs[leg].second) {
             // Add bsplit to starttree
-            cout << "  Adding split " << bsplit.createPatternRepresentation() << endl;
+            // //temporary!
+            // cout << "  Adding split " << bsplit.createPatternRepresentation() << endl;
             double edgelen = bsplit.getEdgeLen();
-            edgelen *= edgelen_multiplicative_factor;
-            starttree.addSplit(bsplit, edgelen);
-            cout << "  tree now: " << starttree.makeNewick(5, true) << endl;
+            //edgelen *= edgelen_multiplicative_factor;
+            starttree.addSplit(bsplit);
+            // //temporary!
+            // cout << "  tree now: " << starttree.makeNewick(5, true) << endl;
         }
+        ++leg;
+    }
+
+    // //temporary!
+    // cerr << "Modifying edge lengths..." << endl;
+
+    // Modify edge lengths
+    for (unsigned i = 0; i < leg; ++i) {
+        // //temporary!
+        // cerr << "  i = " << i << " leg = " << leg << " ABpairs[i].second.size() = " << ABpairs[i].second.size() << endl;
+
+        for (auto & bsplit : ABpairs[i].second) {
+            double edgelen_multiplicative_factor = (lambda*lenB[i] - (1.0 - lambda)*lenA[i])/lenB[i];
+            double edgelen = bsplit.getEdgeLen();
+
+            // //temporary!
+            // cerr << "  bsplit = " << bsplit.createPatternRepresentation() << " edgelen = " << edgelen << " edgelen_multiplicative_factor = " << edgelen_multiplicative_factor << endl;
+
+            starttree.setEdgeLength(bsplit, edgelen_multiplicative_factor*edgelen);
+        }
+    }
+    for (unsigned i = leg; i < ABpairs.size(); ++i) {
+        // //temporary!
+        // cerr << "  i = " << i << " ABpairs.size() = " << ABpairs.size() << " ABpairs[i].first.size() = " << ABpairs[i].first.size() << endl;
+
+        for (auto & asplit : ABpairs[i].first) {
+            double edgelen_multiplicative_factor = ((1 - lambda)*lenA[i] - lambda*lenB[i])/lenA[i];
+            double edgelen = asplit.getEdgeLen();
+
+            // //temporary!
+            // cerr << "  asplit = " << asplit.createPatternRepresentation() << " edgelen = " << edgelen << " edgelen_multiplicative_factor = " << edgelen_multiplicative_factor << endl;
+
+            starttree.setEdgeLength(asplit, edgelen_multiplicative_factor*edgelen);
+        }
+    }
+
+    for (unsigned i = 0; i < commonPairs.size(); ++i) {
+        double from_edgelen = commonPairs[i].first.getEdgeLen();
+        double to_edgelen = commonPairs[i].second.getEdgeLen();
+        double new_edgelen = from_edgelen + lambda*(to_edgelen - from_edgelen);
+        starttree.setEdgeLength(commonPairs[i].first, new_edgelen);
     }
 }
 
@@ -1578,11 +1637,12 @@ inline bool OP::frechetCloseEnough(vector<TreeManip> & mu, unsigned lower, unsig
     // true iff all pairwise distances are less than epsilon
     bool is_close_enough = true;
     vector<Split::treeid_pair_t> ABpairs;
+    vector<Split::split_pair_t> commonPairs;
     assert(lower < upper);
     assert (upper < mu.size());
     for (unsigned i = lower; i < upper - 1; ++i) {
         for (unsigned j = i+1; j < upper; ++j) {
-            double bhvdist = calcBHVDistance(mu[i], mu[j], ABpairs);
+            double bhvdist = calcBHVDistance(mu[i], mu[j], ABpairs, commonPairs);
             if (bhvdist > epsilon) {
                 is_close_enough = false;
                 break;
@@ -1594,16 +1654,19 @@ inline bool OP::frechetCloseEnough(vector<TreeManip> & mu, unsigned lower, unsig
 
 inline void OP::computeFrechetMean(TreeManip & meantree) const {
     double   epsilon = 0.001; // successive mean estimates must be at least this close to stop iterating
-    unsigned       N = 5;     // number of previous mean estimates that must be as close as epsilon
-    unsigned       K = 100;   // maximum number of iterations
-    unsigned k = 1;           // keeps track of iterations
-    vector<TreeManip> mu(k);  // the trail of estimated mean trees (always has length k)
+    unsigned N = 5;   // number of previous mean estimates that must be as close as epsilon
+    unsigned K = 100; // maximum number of iterations
+    unsigned k = 0;   // keeps track of iterations
+    vector<TreeManip> mu;
+    mu.reserve(K);// the trail of estimated mean trees (always has length k)
     Lot lot;
     lot.setSeed(_rnseed);
+    mu.emplace_back();
     chooseRandomTree(mu[k], lot);
     bool close_enough = false;
     while (k < K || close_enough) {
         mu.emplace_back();
+        assert(mu.size() > k);
         chooseRandomTree(mu[k+1], lot);
         displaceTreeAlongGeodesic(mu[k+1], mu[k], 1.0/(k+1));
         ++k;
@@ -1617,31 +1680,31 @@ inline void OP::run() {
     try {
         // Read in trees
         _tree_summary = std::make_shared<TreeSummary>();
-        _tree_summary->readTreefile(_tree_file_name, 0);
+        _tree_summary->readTreefile(_tree_file_name, _taxon_labels, 0);
         unsigned ntrees = _tree_summary->getNumTrees();
         if (ntrees < 2) {
             throw Xop("Must input at least 2 trees to compute tree distances");
         }
 
-        //temporary!
-        Split::treeid_t internalsplits;
-        Split::treeid_t leafsplits;
-        TreeManip starttm;
-        buildTree(0, starttm);
-        starttm.storeSplits(internalsplits, leafsplits);
-        cerr << "start: " << starttm.makeNewick(5, true) << endl;
-        starttm.debugCheckSplits();
-
-        TreeManip endtm;
-        buildTree(1, endtm);
-        endtm.storeSplits(internalsplits, leafsplits);
-        cerr << "end: " << endtm.makeNewick(5, true) << endl;
-        endtm.debugCheckSplits();
-
-        displaceTreeAlongGeodesic(starttm, endtm, 0.5);
-        cerr << starttm.makeNewick(5) << endl;
-        cerr << "start moved to end: " << starttm.makeNewick(5, true) << endl;
-        exit(0);
+        // //temporary!
+        // Split::treeid_t internalsplits;
+        // Split::treeid_t leafsplits;
+        // TreeManip starttm;
+        // buildTree(0, starttm);
+        // starttm.storeSplits(internalsplits, leafsplits);
+        // cerr << "start: " << starttm.makeNewick(5, true) << endl;
+        // starttm.debugCheckSplits();
+        //
+        // TreeManip endtm;
+        // buildTree(1, endtm);
+        // endtm.storeSplits(internalsplits, leafsplits);
+        // cerr << "end: " << endtm.makeNewick(5, true) << endl;
+        // endtm.debugCheckSplits();
+        //
+        // displaceTreeAlongGeodesic(starttm, endtm, 0.33333333333);
+        // cerr << starttm.makeNewick(5) << endl;
+        // cerr << "start moved to end: " << starttm.makeNewick(5, true) << endl;
+        // exit(0);
 
         if (_output_for_gtp) {
             if (!_quiet)
@@ -1687,7 +1750,8 @@ inline void OP::run() {
                 TreeManip endtm;
                 buildTree(i, endtm);
                 vector<Split::treeid_pair_t> ABpairs;
-                double bhvdist = calcBHVDistance(starttm, endtm, ABpairs);
+                vector<Split::split_pair_t> commonPairs;
+                double bhvdist = calcBHVDistance(starttm, endtm, ABpairs, commonPairs);
                 outf << (i+1) << '\t' << setprecision(static_cast<int>(_precision)) << bhvdist << '\n';
             }
             outf.close();

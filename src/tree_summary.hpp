@@ -26,19 +26,19 @@ namespace op
                                         TreeSummary();
                                         ~TreeSummary();
 
-            void                        readTreefile(const string filename, unsigned skip);
+            void                        readTreefile(const string filename, vector<string> & taxon_labels, unsigned skip);
             void                        showSummary() const;
             unsigned                    getNumTrees() const;
             typename Tree::SharedPtr    getTree(unsigned index);
-            string                 getNewick(unsigned index);
+            string                      getNewick(unsigned index);
             bool                        isRooted(unsigned index);
             void                        clear();
 
         private:
 
             Split::treemap_t            _treeIDs;
-            vector<string>    _newicks;
-            vector<bool>           _is_rooted;
+            vector<string>              _newicks;
+            vector<bool>                _is_rooted;
 
         public:
 
@@ -93,7 +93,7 @@ inline void TreeSummary::clear()
     _newicks.clear();
     }
 
-inline void TreeSummary::readTreefile(const string filename, unsigned skip)
+inline void TreeSummary::readTreefile(const string filename, vector<string> & taxon_labels, unsigned skip)
     {
     TreeManip tm;
     Split::treeid_t splitset;
@@ -125,6 +125,13 @@ inline void TreeSummary::readTreefile(const string filename, unsigned skip)
         NxsTaxaBlock * taxaBlock = nexusReader.GetTaxaBlock(i);
         string taxaBlockTitle = taxaBlock->GetTitle();
 
+        // Copy taxon labels into taxon_labels vector
+        taxon_labels.resize(taxaBlock->GetNumTaxonLabels());
+        for (unsigned j = 0; j < taxon_labels.size(); ++j) {
+            taxon_labels[j] = taxaBlock->GetTaxonLabel(j);
+        }
+        assert(taxaBlock->GetNumActiveTaxa() == taxon_labels.size());
+
         const unsigned nTreesBlocks = nexusReader.GetNumTreesBlocks(taxaBlock);
         for (unsigned j = 0; j < nTreesBlocks; ++j)
             {
@@ -154,10 +161,14 @@ inline void TreeSummary::readTreefile(const string filename, unsigned skip)
                     // NXS_TREE_PROCESSED 					= 0x2000
                     
                     const NxsFullTreeDescription & d = treesBlock->GetFullTreeDescription(t);
-                    
+
+                    // If full tree description is "processed" then node indices will be 1 + index of taxon in
+                    // taxa block
+                    assert(d.IsProcessed());
+
                     bool is_rooted = d.IsRooted();
                     _is_rooted.push_back(is_rooted);
-                    
+
                     // store the newick tree description
                     string newick = d.GetNewick();;
                     _newicks.push_back(newick);

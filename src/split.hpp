@@ -30,6 +30,7 @@ namespace op
             typedef vector<split_unit_t>                        split_t;
             typedef set<Split>                                  treeid_t;
             typedef pair<treeid_t, treeid_t>                    treeid_pair_t;
+            typedef pair<Split, Split>                          split_pair_t;
             typedef map< treeid_t, vector<unsigned> >           treemap_t;
 
             void                                                setEdgeLen(double v);

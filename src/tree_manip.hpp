@@ -35,11 +35,13 @@ namespace op {
 
         string                      makeNewick(unsigned precision, bool use_names = false) const;
         void                        buildFromNewick(const string newick, bool rooted, bool allow_polytomies);
+        void                        setLeafNames(const vector<string> & leafnames);
         void                        storeSplits(set<Split> & internal_splits, set<Split> & leaf_splits);
+        void                        setEdgeLength(const Split & s, double edge_length);
         void                        rerootAt(int node_index);
 
         void                        dropSplit(const Split & s);
-        void                        addSplit(const Split & s, double edgelen);
+        void                        addSplit(const Split & s);
         void                        debugCheckSplits() const;
 
     private:
@@ -686,6 +688,14 @@ namespace op {
         }
     }
 
+    inline void TreeManip::setLeafNames(const vector<string> & leafnames) {
+        for (auto nd : _tree->_preorder) {
+            if (nd->_number < leafnames.size()) {
+                nd->_name = leafnames[nd->_number];
+            }
+        }
+    }
+
     inline void TreeManip::buildFromNewick(const string newick, bool rooted, bool allow_polytomies)
     {
         clear();
@@ -965,7 +975,24 @@ namespace op {
             clear();
             throw x;
         }
+    }
 
+    inline void TreeManip::setEdgeLength(const Split & s, double edge_length) {
+        // Assumes nodes in the tree have splits set correctly
+        // Find split s in the tree and change that edge length
+        for (auto nd : _tree->_preorder) {
+            if (s == nd->_split) {
+                nd->_split.setEdgeLen(edge_length);
+                nd->setEdgeLength(edge_length);
+
+                //temporary
+                cerr << "  setting length of " << s.createPatternRepresentation() << " to " << setprecision(5) << edge_length << endl;
+
+                return;
+            }
+        }
+        //temporary
+        cerr << "  !! Could not find split " << s.createPatternRepresentation() << " in tree" << endl;
     }
 
     inline void TreeManip::storeSplits(set<Split> & internal_splits, set<Split> & leaf_splits) {
@@ -1052,7 +1079,7 @@ namespace op {
         debugCheckSplits();
     }
 
-    inline void TreeManip::addSplit(const Split & s, double edgelen) {
+    inline void TreeManip::addSplit(const Split & s) {
         // Find first node not currently in use
         Node * newnd = nullptr;
         for (unsigned i = 0; i < _tree->_nodes.size(); i++) {
@@ -1101,7 +1128,6 @@ namespace op {
                 nd->_left_child = newnd;
                 newnd->_right_sib = oldndlchild;
                 newnd->_parent = nd;
-                newnd->setEdgeLength((edgelen));
                 newnd->_split = s;
                 break;
             }
