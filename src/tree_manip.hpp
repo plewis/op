@@ -33,7 +33,7 @@ namespace op {
         void                        createTestTree();
         void                        clear();
 
-        string                      makeNewick(unsigned precision, bool use_names = false) const;
+        string                      makeNewick(unsigned precision, const vector<string> & taxon_names) const;
         void                        buildFromNewick(const string newick, bool rooted, bool allow_polytomies);
         void                        setLeafNames(const vector<string> & leafnames);
         void                        storeSplits(set<Split> & internal_splits, set<Split> & leaf_splits);
@@ -226,8 +226,9 @@ namespace op {
         _tree->_levelorder.push_back(second_leaf);
     }
 
-    inline string TreeManip::makeNewick(unsigned precision, bool use_names) const
+    inline string TreeManip::makeNewick(unsigned precision, const vector<string> & taxon_names) const
     {
+        bool use_names = taxon_names.size() > 0;
         string newick;
         const format tip_node_format( str(format("%%d:%%.%df") % precision) );
         const format tip_node_format_using_names( str(format("%%s:%%.%df") % precision) );
@@ -253,7 +254,7 @@ namespace op {
             else
             {
                 if (use_names)
-                    newick += str(format(tip_node_format_using_names) % nd->_name % nd->_edge_length);
+                    newick += str(format(tip_node_format_using_names) % taxon_names[nd->_number] % nd->_edge_length);
                 else
                     newick += str(format(tip_node_format) % (nd->_number + 1) % nd->_edge_length);
                 if (nd->_right_sib)
@@ -985,14 +986,14 @@ namespace op {
                 nd->_split.setEdgeLen(edge_length);
                 nd->setEdgeLength(edge_length);
 
-                //temporary
-                cerr << "  setting length of " << s.createPatternRepresentation() << " to " << setprecision(5) << edge_length << endl;
+                // //temporary!
+                // cerr << "  setting length of " << s.createPatternRepresentation() << " to " << setprecision(5) << edge_length << endl;
 
                 return;
             }
         }
-        //temporary
-        cerr << "  !! Could not find split " << s.createPatternRepresentation() << " in tree" << endl;
+        // //temporary!
+        // cerr << "  !! Could not find split " << s.createPatternRepresentation() << " in tree" << endl;
     }
 
     inline void TreeManip::storeSplits(set<Split> & internal_splits, set<Split> & leaf_splits) {
@@ -1076,7 +1077,7 @@ namespace op {
 
         refreshPreorder();
         refreshLevelorder();
-        debugCheckSplits();
+        //debugCheckSplits();
     }
 
     inline void TreeManip::addSplit(const Split & s) {
@@ -1134,7 +1135,7 @@ namespace op {
         }
         refreshPreorder();
         refreshLevelorder();
-        debugCheckSplits();
+        //debugCheckSplits();
     }
 
 }

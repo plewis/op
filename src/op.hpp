@@ -1642,7 +1642,7 @@ inline bool OP::frechetCloseEnough(vector<TreeManip> & mu, unsigned lower, unsig
     assert (upper < mu.size());
     for (unsigned i = lower; i < upper - 1; ++i) {
         for (unsigned j = i+1; j < upper; ++j) {
-            double bhvdist = calcBHVDistance(mu[i], mu[j], ABpairs, commonPairs);
+            double bhvdist = calcBHVDistance(mu[i-1], mu[j-1], ABpairs, commonPairs);
             if (bhvdist > epsilon) {
                 is_close_enough = false;
                 break;
@@ -1656,24 +1656,40 @@ inline void OP::computeFrechetMean(TreeManip & meantree) const {
     double   epsilon = 0.001; // successive mean estimates must be at least this close to stop iterating
     unsigned N = 5;   // number of previous mean estimates that must be as close as epsilon
     unsigned K = 100; // maximum number of iterations
-    unsigned k = 0;   // keeps track of iterations
+    unsigned k = 1;   // keeps track of iterations
     vector<TreeManip> mu;
     mu.reserve(K);// the trail of estimated mean trees (always has length k)
     Lot lot;
     lot.setSeed(_rnseed);
     mu.emplace_back();
-    chooseRandomTree(mu[k], lot);
-    bool close_enough = false;
-    while (k < K || close_enough) {
-        mu.emplace_back();
-        assert(mu.size() > k);
-        chooseRandomTree(mu[k+1], lot);
-        displaceTreeAlongGeodesic(mu[k+1], mu[k], 1.0/(k+1));
+    chooseRandomTree(mu[k-1], lot);
+    bool done = false;
+    while (!done) {
         ++k;
-        if (k >= N)
-            close_enough = frechetCloseEnough(mu, k-N, k, epsilon);
+        mu.emplace_back();
+        assert(mu.size() == k);
+        chooseRandomTree(mu[k-1], lot);
+
+        // //temporary!
+        // cerr << "k = " << k << endl;
+        // cerr << "  mu[k-1] = " << mu[k-1].makeNewick(5) << endl;
+        // cerr << "  ----- " << k << "/" << (k+1) << " ---->" << endl;
+        // cerr << "  mu[k-2] = " << mu[k-2].makeNewick(5) << endl;
+
+        displaceTreeAlongGeodesic(mu[k-1], mu[k-2], 1.0*k/(k+1));
+
+        // //temporary!
+        // cerr << "  mu[k-1] = " << mu[k-1].makeNewick(5) << endl;
+        // cerr << endl;
+
+        if (k >= N) {
+            done = true;
         }
-    meantree.setTree(mu[k].getTree());
+        if (k > N) {
+            done = frechetCloseEnough(mu, k-N, k, epsilon);
+        }
+    }
+    meantree.setTree(mu[k-1].getTree());
 }
 
 inline void OP::run() {
@@ -1727,11 +1743,33 @@ inline void OP::run() {
             TreeManip meantree;
             if (!_quiet)
                 cout << "Computing Frechet mean tree..." << endl;
+
+            // Compute the mean
             computeFrechetMean(meantree);
+
+            // Compute the variance
+            double variance = 0.0;
+            for (unsigned i = 0; i < ntrees; i++) {
+                TreeManip tm;
+                buildTree(i, tm);
+                vector<Split::treeid_pair_t> ABpairs;
+                vector<Split::split_pair_t> commonPairs;
+                double bhvdist = calcBHVDistance(meantree, tm, ABpairs, commonPairs);
+                variance += bhvdist*bhvdist;
+                //outf << (i+1) << '\t' << setprecision(static_cast<int>(_precision)) << bhvdist << '\n';
+            }
+            variance /= (ntrees - 1);
+
+            // Save the mean tree and variance
+            ofstream meanf("mean-tree.txt");
+            meanf << meantree.makeNewick(9, _taxon_labels) << endl;
+            meanf << "# variance = " << setprecision(9) << variance << endl;
+            meanf.close();
 
             if (!_quiet) {
                 cout << "Mean tree:" << endl;
-                cout << meantree.makeNewick(9) << endl;
+                cout << meantree.makeNewick(9, _taxon_labels) << endl;
+                cout << "Variance = " << variance << endl;
             }
 
             if (!_quiet)
