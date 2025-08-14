@@ -21,8 +21,6 @@ namespace op {
         TreeManip(Tree::SharedPtr t);
         ~TreeManip();
 
-
-
         void                        createLeafNodeMap(map<string, Node *> & leafmap);
         Node *                      getNodeWithSplit(Split & s);
 
@@ -31,9 +29,8 @@ namespace op {
         double                      calcTreeLength() const;
         void                        scaleAllEdgeLengths(double scaler);
         void                        createTestTree();
-        void                        clear();
 
-        string                      makeNewick(unsigned precision, const vector<string> & taxon_names) const;
+        string                      makeNewick(unsigned precision) const;
         void                        buildFromNewick(const string newick, bool rooted, bool allow_polytomies);
         void                        setLeafNames(const vector<string> & leafnames);
         void                        storeSplits(set<Split> & internal_splits, set<Split> & leaf_splits);
@@ -43,6 +40,9 @@ namespace op {
         void                        dropSplit(const Split & s);
         void                        addSplit(const Split & s);
         void                        debugCheckSplits() const;
+
+        static vector<string>           _taxon_names; // all trees stored by any TreeManip use this taxon ordering
+        static map<string, unsigned>    _taxon_map;   // maps taxon name found in treefile to index into _taxon_names
 
     private:
 
@@ -55,7 +55,7 @@ namespace op {
         void                        stripOutNexusComments(string & newick);
         bool                        canHaveSibling(Node * nd, bool rooted, bool allow_polytomies);
 
-        Tree::SharedPtr             _tree;
+        Tree::SharedPtr                 _tree;
 
     public:
 
@@ -65,24 +65,19 @@ namespace op {
     inline TreeManip::TreeManip()
     {
         //cerr << "Constructing a TreeManip" << endl;
-        clear();
+        _tree.reset();
     }
 
     inline TreeManip::TreeManip(Tree::SharedPtr t)
     {
         //cerr << "Constructing a TreeManip with a supplied tree" << endl;
-        clear();
+        _tree.reset();
         setTree(t);
     }
 
     inline TreeManip::~TreeManip()
     {
         //cerr << "Destroying a TreeManip" << endl;
-    }
-
-    inline void TreeManip::clear()
-    {
-        _tree.reset();
     }
 
     inline Node * TreeManip::getNodeWithSplit(Split & s) {
@@ -137,7 +132,7 @@ namespace op {
 
     inline void TreeManip::createTestTree()
     {
-        clear();
+        _tree.reset();
         _tree = Tree::SharedPtr(new Tree());
         _tree->_nodes.resize(6);
 
@@ -226,9 +221,9 @@ namespace op {
         _tree->_levelorder.push_back(second_leaf);
     }
 
-    inline string TreeManip::makeNewick(unsigned precision, const vector<string> & taxon_names) const
+    inline string TreeManip::makeNewick(unsigned precision) const
     {
-        bool use_names = taxon_names.size() > 0;
+        bool use_names = _taxon_names.size() > 0;
         string newick;
         const format tip_node_format( str(format("%%d:%%.%df") % precision) );
         const format tip_node_format_using_names( str(format("%%s:%%.%df") % precision) );
@@ -254,7 +249,7 @@ namespace op {
             else
             {
                 if (use_names)
-                    newick += str(format(tip_node_format_using_names) % taxon_names[nd->_number] % nd->_edge_length);
+                    newick += str(format(tip_node_format_using_names) % _taxon_names[nd->_number] % nd->_edge_length);
                 else
                     newick += str(format(tip_node_format) % (nd->_number + 1) % nd->_edge_length);
                 if (nd->_right_sib)
@@ -294,34 +289,36 @@ namespace op {
         assert(nd);
         bool success = true;
         unsigned x = 0;
-        try
-        {
+        try {
             x = stoi(nd->_name);
-        }
-        catch(invalid_argument &)
-        {
-            // node name could not be converted to an integer value
+            assert(x > 0);
+            --x;
+        } catch(invalid_argument &) {
             success = false;
         }
 
-        if (success)
-        {
-            // conversion succeeded
-            // attempt to insert x into the set of node numbers altready used
-            pair<set<unsigned>::iterator, bool> insert_result = used.insert(x);
-            if (insert_result.second)
-            {
-                // insertion was made, so x has NOT already been used
-                nd->_number = x - 1;
-            }
-            else
-            {
-                // insertion was not made, so set already contained x
-                throw Xop(str(format("leaf number %d used more than once") % x));
+        if (!success) {
+            // Node name could not be converted to an integer value
+            // Assume node name is an actual taxon name
+            try {
+                x = _taxon_map.at(nd->_name);
+            } catch(out_of_range &) {
+                // Add this taxon name to _taxon_names and _taxon_map
+                x = (unsigned)_taxon_names.size();
+                _taxon_names.emplace_back(nd->_name);
+                _taxon_map[nd->_name] = x;
             }
         }
-        else
-            throw Xop(str(format("node name (%s) not interpretable as a positive integer") % nd->_name));
+
+        // attempt to insert x into the set of node numbers already used
+        pair<set<unsigned>::iterator, bool> insert_result = used.insert(x);
+        if (insert_result.second) {
+            // insertion was made, so x has NOT already been used
+            nd->_number = x;
+        } else {
+            // insertion was not made, so set already contained x
+            throw Xop(str(format("leaf number %d used more than once") % x));
+        }
     }
 
     inline void TreeManip::extractEdgeLen(Node * nd, string edge_length_string)
@@ -699,7 +696,7 @@ namespace op {
 
     inline void TreeManip::buildFromNewick(const string newick, bool rooted, bool allow_polytomies)
     {
-        clear();
+        _tree.reset();
         _tree.reset(new Tree());
         _tree->_is_rooted = rooted;
 
@@ -973,7 +970,7 @@ namespace op {
         }
         catch(Xop x)
         {
-            clear();
+            _tree.reset();
             throw x;
         }
     }

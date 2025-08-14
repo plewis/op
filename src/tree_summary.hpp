@@ -26,7 +26,8 @@ namespace op
                                         TreeSummary();
                                         ~TreeSummary();
 
-            void                        readTreefile(const string filename, vector<string> & taxon_labels, unsigned skip);
+            void                        readRevBayesTreefile(const string filename, unsigned skip);
+            void                        readTreefile(const string filename, unsigned skip);
             void                        showSummary() const;
             unsigned                    getNumTrees() const;
             typename Tree::SharedPtr    getTree(unsigned index);
@@ -56,7 +57,6 @@ inline TreeSummary::~TreeSummary()
     }
 
 inline unsigned TreeSummary::getNumTrees() const {
-    assert(_newicks.size() > 0);
     return (unsigned)_newicks.size();
 }
 
@@ -93,7 +93,42 @@ inline void TreeSummary::clear()
     _newicks.clear();
     }
 
-inline void TreeSummary::readTreefile(const string filename, vector<string> & taxon_labels, unsigned skip)
+inline void TreeSummary::readRevBayesTreefile(const string filename, unsigned skip) {
+    ifstream inf(filename.c_str());
+    stringstream buffer;
+    buffer << inf.rdbuf();
+    string line;
+
+    // Get header
+    getline(buffer, line);
+
+    // Split header at tabs
+    vector<string> parts;
+    boost::algorithm::split(parts, line, boost::is_any_of("\t"));
+    auto nparts = (unsigned)parts.size();
+
+    // Assuming this is indeed a RevBayes tree file
+    assert(nparts == 5);
+    assert(parts[4] == "psi");
+
+    TreeManip tm;
+    unsigned nskipped = 0;
+    while (getline(buffer, line)) {
+        if (nskipped++ < skip) {
+            ++nskipped;
+        }
+        else {
+            boost::algorithm::split(parts, line, boost::is_any_of("\t"));
+            nparts = (unsigned)parts.size();
+            assert(nparts == 5);
+            _is_rooted.push_back(true);
+            string & newick = parts[4];
+            _newicks.emplace_back(newick);
+        }
+    }
+}
+
+inline void TreeSummary::readTreefile(const string filename, unsigned skip)
     {
     TreeManip tm;
     Split::treeid_t splitset;
@@ -125,12 +160,15 @@ inline void TreeSummary::readTreefile(const string filename, vector<string> & ta
         NxsTaxaBlock * taxaBlock = nexusReader.GetTaxaBlock(i);
         string taxaBlockTitle = taxaBlock->GetTitle();
 
-        // Copy taxon labels into taxon_labels vector
-        taxon_labels.resize(taxaBlock->GetNumTaxonLabels());
-        for (unsigned j = 0; j < taxon_labels.size(); ++j) {
-            taxon_labels[j] = taxaBlock->GetTaxonLabel(j);
+        // Copy taxon labels into static TreeManip::_taxon_names vector
+        TreeManip::_taxon_names.resize(taxaBlock->GetNumTaxonLabels());
+        TreeManip::_taxon_map.clear();
+        for (unsigned j = 0; j < TreeManip::_taxon_names.size(); ++j) {
+            string taxon_name = taxaBlock->GetTaxonLabel(j);
+            TreeManip::_taxon_names[j] = taxon_name;
+            TreeManip::_taxon_map[taxon_name] = j;
         }
-        assert(taxaBlock->GetNumActiveTaxa() == taxon_labels.size());
+        assert(taxaBlock->GetNumActiveTaxa() == TreeManip::_taxon_names.size());
 
         const unsigned nTreesBlocks = nexusReader.GetNumTreesBlocks(taxaBlock);
         for (unsigned j = 0; j < nTreesBlocks; ++j)

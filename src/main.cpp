@@ -16,6 +16,8 @@ using namespace std;
 #include <boost/random/normal_distribution.hpp>
 #include <boost/random/uniform_real.hpp>
 #include <boost/random/variate_generator.hpp>
+#include <boost/algorithm/string/split.hpp>
+#include <boost/algorithm/string/classification.hpp>
 
 #include "split.hpp"
 #include "node.hpp"
@@ -34,6 +36,8 @@ string  OP::_program_name        = "kfdist";
 unsigned     OP::_major_version       = 1;
 unsigned     OP::_minor_version       = 0;
 const double Node::_smallest_edge_length = 1.0e-12;
+vector<string> TreeManip::_taxon_names;
+map<string, unsigned> TreeManip::_taxon_map;
 
 #if defined(OP_SAVE_DOT_FILE)
 unsigned OP::_graph_number          = 1;

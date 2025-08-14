@@ -80,13 +80,19 @@ private:
 
         bool                    _quiet;
         bool                    _output_for_gtp;
+        string                  _frechet_prefix;
         bool                    _frechet_mean;
         unsigned                _precision;
         unsigned                _rnseed;
+        unsigned                _skip;
         string                  _tree_file_name;
         string                  _distance_measure;
         TreeSummary::SharedPtr  _tree_summary;
-        vector<string>          _taxon_labels;
+        //vector<string>          _taxon_labels;
+
+        double                  _frechet_epsilon;
+        unsigned                _frechet_n;
+        unsigned                _frechet_k;
 
         static string           _program_name;
         static unsigned         _major_version;
@@ -108,13 +114,18 @@ inline OP::~OP() = default;
 inline void OP::clear() {
     _quiet = true;
     _output_for_gtp = false;
+    _frechet_prefix = "mean-and-variance";
     _frechet_mean = false;
     _tree_file_name = "";
     _distance_measure = "geodesic";
     _tree_summary   = nullptr;
     _precision = 9;
     _rnseed = 1;
-    _taxon_labels.clear();
+    _skip = 0;
+    //_taxon_labels.clear();
+    _frechet_epsilon = 0.001;
+    _frechet_n = 5;
+    _frechet_k = 100;
 }
 
 inline void OP::processCommandLineOptions(int argc, const char * argv[]) {
@@ -124,9 +135,13 @@ inline void OP::processCommandLineOptions(int argc, const char * argv[]) {
         ("help,h", "produce help message")
         ("version,v", "show program version")
         ("treefile,t",  program_options::value(&_tree_file_name)->required(), "name of data file in NEXUS format (required, no default)")
+        ("skip", program_options::value(&_skip), "number of trees to skip in specified treefile (default: 0)")
         ("dist", program_options::value(&_distance_measure), "specify either kf or geodesic (default: geodesic)")
         ("precision", program_options::value(&_precision)->default_value(9), "number of digits precision to use in outputting distances (default: 9)")
-        ("frechet", program_options::value(&_frechet_mean)->default_value(false), "compute Frechet mean tree using Sturm's algorithm and geodesic distances")
+        ("frechet", program_options::value(&_frechet_prefix), "filename prefix for saving Frechet mean tree and variance")
+        ("frechet-epsilon,e", program_options::value(&_frechet_epsilon), "successive Frechet mean approximations must all be this close to stop iterating")
+        ("frechet-n,n", program_options::value(&_frechet_n), "number of successive Frechet mean approximations to use for determining whether to stop iterating")
+        ("frechet-k,k", program_options::value(&_frechet_k), "maximum number of Frechet mean iterations")
         ("gtptest", program_options::value(&_output_for_gtp)->default_value(false), "output treefile that can be read by Owens-Provan GTP program")
         ("quiet,q", program_options::value(&_quiet), "suppress all output except for errors (default: yes)")
         ("rnseed", program_options::value(&_rnseed), "pseudorandom number generator seed (used only when estimating mean tree)")
@@ -151,6 +166,12 @@ inline void OP::processCommandLineOptions(int argc, const char * argv[]) {
     if (vm.count("version") > 0) {
         cout << str(format("This is %s version %d.%d") % _program_name % _major_version % _minor_version) << endl;
         exit(1);
+    }
+
+    // If the user specified --frechet on the command line, set _frechet_mean and _frechet_prefix
+    if (vm.count("frechet") > 0) {
+        _frechet_mean = true;
+        _frechet_prefix = vm["frechet"].as<string>();
     }
 }
 
@@ -1294,7 +1315,7 @@ inline void OP::buildTree(unsigned tree_index, TreeManip & tm) const {
         throw Xop("Trees must be rooted in this version");
     }
     tm.buildFromNewick(newick, /*rooted*/isrooted, /*allow_polytomies*/true);
-    tm.setLeafNames(_taxon_labels);
+    //tm.setLeafNames(_taxon_labels);
 }
 
 inline double OP::calcBHVDistance(
@@ -1653,9 +1674,9 @@ inline bool OP::frechetCloseEnough(vector<TreeManip> & mu, unsigned lower, unsig
 }
 
 inline void OP::computeFrechetMean(TreeManip & meantree) const {
-    double   epsilon = 0.001; // successive mean estimates must be at least this close to stop iterating
-    unsigned N = 5;   // number of previous mean estimates that must be as close as epsilon
-    unsigned K = 100; // maximum number of iterations
+    double   epsilon = _frechet_epsilon; // successive mean estimates must be at least this close to stop iterating
+    unsigned N = _frechet_n;   // number of previous mean estimates that must be as close as epsilon
+    unsigned K = _frechet_k; // maximum number of iterations
     unsigned k = 1;   // keeps track of iterations
     vector<TreeManip> mu;
     mu.reserve(K);// the trail of estimated mean trees (always has length k)
@@ -1696,8 +1717,12 @@ inline void OP::run() {
     try {
         // Read in trees
         _tree_summary = std::make_shared<TreeSummary>();
-        _tree_summary->readTreefile(_tree_file_name, _taxon_labels, 0);
+        _tree_summary->readTreefile(_tree_file_name, _skip);
         unsigned ntrees = _tree_summary->getNumTrees();
+        if (ntrees == 0) {
+            _tree_summary->readRevBayesTreefile(_tree_file_name, _skip);
+            ntrees = _tree_summary->getNumTrees();
+        }
         if (ntrees < 2) {
             throw Xop("Must input at least 2 trees to compute tree distances");
         }
@@ -1761,14 +1786,15 @@ inline void OP::run() {
             variance /= (ntrees - 1);
 
             // Save the mean tree and variance
-            ofstream meanf("mean-tree.txt");
-            meanf << meantree.makeNewick(9, _taxon_labels) << endl;
+            string fn = _frechet_prefix + ".txt";
+            ofstream meanf(fn);
+            meanf << meantree.makeNewick(9) << endl;
             meanf << "# variance = " << setprecision(9) << variance << endl;
             meanf.close();
 
             if (!_quiet) {
                 cout << "Mean tree:" << endl;
-                cout << meantree.makeNewick(9, _taxon_labels) << endl;
+                cout << meantree.makeNewick(9) << endl;
                 cout << "Variance = " << variance << endl;
             }
 
