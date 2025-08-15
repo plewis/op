@@ -86,7 +86,7 @@ private:
         unsigned                _rnseed;
         unsigned                _skip;
         string                  _tree_file_name;
-        string                  _distance_measure;
+        double                  _distance_lambda;
         TreeSummary::SharedPtr  _tree_summary;
         //vector<string>          _taxon_labels;
 
@@ -117,7 +117,7 @@ inline void OP::clear() {
     _frechet_prefix = "mean-and-variance";
     _frechet_mean = false;
     _tree_file_name = "";
-    _distance_measure = "geodesic";
+    _distance_lambda = -1;
     _tree_summary   = nullptr;
     _precision = 9;
     _rnseed = 1;
@@ -134,9 +134,9 @@ inline void OP::processCommandLineOptions(int argc, const char * argv[]) {
     desc.add_options()
         ("help,h", "produce help message")
         ("version,v", "show program version")
-        ("treefile,t",  program_options::value(&_tree_file_name)->required(), "name of data file in NEXUS format (required, no default)")
+        ("treefile,t",  program_options::value(&_tree_file_name), "name of data file in NEXUS format (required, no default)")
         ("skip", program_options::value(&_skip), "number of trees to skip in specified treefile (default: 0)")
-        ("dist", program_options::value(&_distance_measure), "specify either kf or geodesic (default: geodesic)")
+        ("lambda", program_options::value(&_distance_lambda), "specify a value between 0 and 1 to calculate tree at that point (assumes starting tree is first tree and ending tree is the second tree in the treefile)")
         ("precision", program_options::value(&_precision)->default_value(9), "number of digits precision to use in outputting distances (default: 9)")
         ("frechet", program_options::value(&_frechet_prefix), "filename prefix for saving Frechet mean tree and variance")
         ("frechet-epsilon,e", program_options::value(&_frechet_epsilon), "successive Frechet mean approximations must all be this close to stop iterating")
@@ -165,6 +165,13 @@ inline void OP::processCommandLineOptions(int argc, const char * argv[]) {
     // If the user specified --version on the command line, output the version and quit
     if (vm.count("version") > 0) {
         cout << str(format("This is %s version %d.%d") % _program_name % _major_version % _minor_version) << endl;
+        exit(1);
+    }
+
+    // If the user failed to specify --treefile on the command line, bail out because a treefile is needed for
+    // anything except help and version
+    if (vm.count("treefile") == 0) {
+        cout << "You must specify a treefile if doing anything except --help or --version" << endl;
         exit(1);
     }
 
@@ -1727,26 +1734,6 @@ inline void OP::run() {
             throw Xop("Must input at least 2 trees to compute tree distances");
         }
 
-        // //temporary!
-        // Split::treeid_t internalsplits;
-        // Split::treeid_t leafsplits;
-        // TreeManip starttm;
-        // buildTree(0, starttm);
-        // starttm.storeSplits(internalsplits, leafsplits);
-        // cerr << "start: " << starttm.makeNewick(5, true) << endl;
-        // starttm.debugCheckSplits();
-        //
-        // TreeManip endtm;
-        // buildTree(1, endtm);
-        // endtm.storeSplits(internalsplits, leafsplits);
-        // cerr << "end: " << endtm.makeNewick(5, true) << endl;
-        // endtm.debugCheckSplits();
-        //
-        // displaceTreeAlongGeodesic(starttm, endtm, 0.33333333333);
-        // cerr << starttm.makeNewick(5) << endl;
-        // cerr << "start moved to end: " << starttm.makeNewick(5, true) << endl;
-        // exit(0);
-
         if (_output_for_gtp) {
             if (!_quiet)
                 cout << "Writing trees in newick format to file \"trees-for-gtp.txt\"" << endl;
@@ -1761,6 +1748,37 @@ inline void OP::run() {
             // we try to do on this run
             if (!_quiet)
                 cout << "Done." << endl;
+            return;
+        }
+
+        if (_distance_lambda >= 0.0 && _distance_lambda <= 1.0) {
+            if (!_quiet)
+                cout << "Computing tree at lambda = " << setprecision(5) << _distance_lambda << "..." << endl;
+
+            if (_tree_summary->getNumTrees() < 2) {
+                throw Xop("Must input at least 2 trees to compute tree at a particular lambda value");
+            }
+
+            TreeManip starttm;
+            buildTree(0, starttm);
+
+            TreeManip endtm;
+            buildTree(1, endtm);
+
+            displaceTreeAlongGeodesic(starttm, endtm, _distance_lambda);
+
+            // Save the tree at _distance_lambda from the starting tree toward the ending tree
+            string fn = boost::str(format("tree-at-lambda-%.5f.txt") % _distance_lambda);
+            ofstream midf(fn);
+            midf << starttm.makeNewick(9) << endl;
+            midf << "# lambda = " << setprecision(9) << _distance_lambda << endl;
+            midf.close();
+
+            if (!_quiet) {
+                cout << "Tree at lambda = " << setprecision(5) << _distance_lambda << ":" << endl;
+                cout << starttm.makeNewick(9) << endl;
+            }
+
             return;
         }
 
@@ -1803,35 +1821,34 @@ inline void OP::run() {
             return;
         }
 
-        if (_distance_measure == "geodesic") {
-            if (!_quiet)
-                cout << "Writing geodesic distances to file \"bhvdists.txt\"" << endl;
-            ofstream outf("bhvdists.txt");
-            outf << "tree	distance to tree 1" << endl;
-            TreeManip starttm;
-            buildTree(0, starttm);
-            for (unsigned i = 1; i < ntrees; i++) {
-                TreeManip endtm;
-                buildTree(i, endtm);
-                vector<Split::treeid_pair_t> ABpairs;
-                vector<Split::split_pair_t> commonPairs;
-                double bhvdist = calcBHVDistance(starttm, endtm, ABpairs, commonPairs);
-                outf << (i+1) << '\t' << setprecision(static_cast<int>(_precision)) << bhvdist << '\n';
-            }
-            outf.close();
+        if (!_quiet)
+            cout << "Writing geodesic distances to file \"bhvdists.txt\"" << endl;
+        ofstream outf("bhvdists.txt");
+        outf << "tree	distance to tree 1" << endl;
+        TreeManip starttm;
+        buildTree(0, starttm);
+        for (unsigned i = 1; i < ntrees; i++) {
+            TreeManip endtm;
+            buildTree(i, endtm);
+            vector<Split::treeid_pair_t> ABpairs;
+            vector<Split::split_pair_t> commonPairs;
+            double bhvdist = calcBHVDistance(starttm, endtm, ABpairs, commonPairs);
+            outf << (i+1) << '\t' << setprecision(static_cast<int>(_precision)) << bhvdist << '\n';
         }
-        else if (_distance_measure == "kf") {
-            if (!_quiet)
-                cout << "Writing KF distances to file \"kfdists.txt\"" << endl;
-            ofstream outf("kfdists.txt");
-            outf << "tree	distance to tree 1" << endl;
-            for (unsigned i = 1; i < ntrees; i++) {
-                double kfss = calcKFDistance(0, i);
-                double kfdist = sqrt(kfss);
-                outf << str(format("%d\t%.5f") % (i+1) % kfdist) << endl;
-            }
-            outf.close();
+        outf.close();
+
+#if defined(OLD_KF_CODE)
+        if (!_quiet)
+            cout << "Writing KF distances to file \"kfdists.txt\"" << endl;
+        ofstream outf("kfdists.txt");
+        outf << "tree	distance to tree 1" << endl;
+        for (unsigned i = 1; i < ntrees; i++) {
+            double kfss = calcKFDistance(0, i);
+            double kfdist = sqrt(kfss);
+            outf << str(format("%d\t%.5f") % (i+1) % kfdist) << endl;
         }
+        outf.close();
+#endif
     }
     catch (Xop & x) {
         cerr << "OP encountered a problem:\n  " << x.what() << endl;

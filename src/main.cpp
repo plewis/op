@@ -32,9 +32,9 @@ using namespace std;
 using namespace op;
 
 // static data member initializations
-string  OP::_program_name        = "kfdist";
+string  OP::_program_name        = "op";
 unsigned     OP::_major_version       = 1;
-unsigned     OP::_minor_version       = 0;
+unsigned     OP::_minor_version       = 3;
 const double Node::_smallest_edge_length = 1.0e-12;
 vector<string> TreeManip::_taxon_names;
 map<string, unsigned> TreeManip::_taxon_map;
