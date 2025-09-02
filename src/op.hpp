@@ -1631,13 +1631,13 @@ inline void OP::displaceTreeAlongGeodesic(TreeManip & start_tree, TreeManip & en
 }
 
 inline bool OP::frechetCloseEnough(vector<TreeManip> & mu, unsigned lower, unsigned upper, double epsilon) const {
-    // Compute pairwise distances between trees in mu with index > lower and index <= upper and return
+    // Compute pairwise distances between trees in mu with index >= lower and index < upper and return
     // true iff all pairwise distances are less than epsilon
     bool is_close_enough = true;
     vector<Split::treeid_pair_t> ABpairs;
     vector<Split::split_pair_t> commonPairs;
     assert(lower < upper);
-    assert (upper < mu.size());
+    assert (upper <= mu.size());
     for (unsigned i = lower; i < upper - 1; ++i) {
         for (unsigned j = i+1; j < upper; ++j) {
             double bhvdist = calcBHVDistance(mu[i-1], mu[j-1], ABpairs, commonPairs);
