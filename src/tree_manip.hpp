@@ -688,7 +688,7 @@ namespace op {
 
     inline void TreeManip::setLeafNames(const vector<string> & leafnames) {
         for (auto nd : _tree->_preorder) {
-            if (nd->_number < leafnames.size()) {
+            if (nd->_number < static_cast<int>(leafnames.size())) {
                 nd->_name = leafnames[nd->_number];
             }
         }
@@ -968,7 +968,7 @@ namespace op {
             refreshPreorder();
             refreshLevelorder();
         }
-        catch(Xop x)
+        catch(Xop & x)
         {
             _tree.reset();
             throw x;

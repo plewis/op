@@ -78,14 +78,14 @@ inline bool TreeSummary::isRooted(unsigned index) {
     if (index >= _is_rooted.size())
         throw Xop("isRooted called with index >= number of stored trees");
 
-        return _is_rooted[index];
+    return _is_rooted[index];
 }
 
 inline string TreeSummary::getNewick(unsigned index) {
     if (index >= _newicks.size())
         throw Xop("getNewick called with index >= number of stored trees");
 
-        return _newicks[index];
+    return _newicks[index];
 }
 
 inline void TreeSummary::clear() {

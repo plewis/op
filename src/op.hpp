@@ -24,9 +24,9 @@ private:
         vector<Split::split_pair_t> & commonPairs) const;
     double calcKFDistance(unsigned ref_index, unsigned test_index) const;
     void chooseRandomTree(TreeManip & tm, Lot & lot) const;
-    void displaceTreeAlongGeodesic(TreeManip & starttree, TreeManip & endtree, double displacement) const;
+    void displaceTreeAlongGeodesic(TreeManip & start_tree, TreeManip & end_tree, double displacement) const;
     bool frechetCloseEnough(vector<TreeManip> & mu, unsigned lower, unsigned upper, double epsilon) const;
-    unsigned computeFrechetMean(TreeManip & meantree) const;
+    unsigned computeFrechetMean(TreeManip & mean_tree) const;
     static double opCalcTreeIDLength(
         const Split::treeid_t & splits);
     double opCalcLeafContribution(
@@ -36,7 +36,7 @@ private:
     double opFindCommonEdges(
         const Split::treeid_t & A,
         const Split::treeid_t & B,
-        vector<Split::split_pair_t> & common_edges) const;
+        vector<Split::split_pair_t> & commonPairs) const;
     void opSplitAtCommonEdges(
         const vector<Split> & common_edges,
         vector<pair<Split::treeid_t,Split::treeid_t> > & in_pairs) const;
@@ -83,13 +83,12 @@ private:
         string                  _frechet_prefix;
         bool                    _frechet_mean;
         unsigned                _precision;
-        unsigned                _rnseed;
+        unsigned                _random_number_seed;
         unsigned                _skip;
         string                  _tree_file_name;
         double                  _distance_lambda;
         double                  _scale_by;
         TreeSummary::SharedPtr  _tree_summary;
-        //vector<string>          _taxon_labels;
 
         double                  _frechet_epsilon;
         unsigned                _frechet_n;
@@ -105,9 +104,21 @@ private:
 
     };
 
-inline OP::OP() : _quiet(true), _output_for_gtp(false), _precision(9) {
+inline OP::OP() :
+    _quiet(true),
+    _output_for_gtp(false),
+    _frechet_prefix("mean-and-variance"),
+    _frechet_mean(false),
+    _precision(9),
+    _random_number_seed(1),
+    _skip(0),
+    _distance_lambda(-1.0),
+    _scale_by(1.0),
+    _tree_summary(nullptr),
+    _frechet_epsilon(0.001),
+    _frechet_n(5),
+    _frechet_k(100) {
     //cout << "Constructing a SStrom" << endl;
-    clear();
 }
 
 inline OP::~OP() = default;
@@ -122,7 +133,7 @@ inline void OP::clear() {
     _scale_by = 1.0;
     _tree_summary   = nullptr;
     _precision = 9;
-    _rnseed = 1;
+    _random_number_seed = 1;
     _skip = 0;
     //_taxon_labels.clear();
     _frechet_epsilon = 0.001;
@@ -146,7 +157,7 @@ inline void OP::processCommandLineOptions(int argc, const char * argv[]) {
         ("frechet-k,k", program_options::value(&_frechet_k), "maximum number of Frechet mean iterations (default:100)")
         ("gtptest", program_options::value(&_output_for_gtp)->default_value(false), "output treefile that can be read by Owens-Provan GTP program")
         ("quiet,q", program_options::value(&_quiet), "suppress all output except for errors (default: yes)")
-        ("rnseed", program_options::value(&_rnseed), "pseudorandom number generator seed (used only when estimating mean tree)")
+        ("seed", program_options::value(&_random_number_seed), "pseudorandom number generator seed (used only when estimating mean tree)")
         ("scale", program_options::value(&_scale_by), "rescale all input trees by this multiplicative factor (default: 1.0)")
         ;
     program_options::store(program_options::parse_command_line(argc, argv, desc), vm);
@@ -322,29 +333,15 @@ inline void OP::opSplitAtCommonEdges(const vector<Split> & common_edges, vector<
             Split::treeid_t a_other_splits, b_other_splits;
 
             // Divvy up a_splits to a_common_splits and a_other_splits
-            // //temporary!
-            // cout << "  Divvying up a_splits:" << endl;
             for (auto & asplit : a_splits) {
-                // //temporary!
-                // cout << "    asplit: " << asplit.createPatternRepresentation();
                 bool is_common = (asplit == common);
-                if (is_common) {
-                    // //temporary!
-                    // cout << " (common)" << endl;
-                }
-                else {
+                if (!is_common) {
                     if (asplit.subsumedIn(common)) {
-                        // //temporary!
-                        // cout << " (subsumed in common)" << endl;
                         a_common_splits.insert(asplit);
                     }
                     else {
-                        // //temporary!
-                        // cout << " (other)" << endl;
                         Split masked = asplit;
                         masked.bitwiseAnd(mask);
-                        // //temporary!
-                        // cout << "    masked: " << masked.createPatternRepresentation() << endl;
                         a_other_splits.insert(masked);
                     }
                 }
@@ -447,7 +444,7 @@ inline void OP::opSaveIncompatibilityGraph(OPVertex & source, OPVertex & sink, v
     //     rankdir=LR;
     //     graph [ranksep=2];
     //
-    //     subgraph Avertices {
+    //     subgraph A_vertices {
     //         label="A";
     //             {
     //             rank=same;
@@ -459,7 +456,7 @@ inline void OP::opSaveIncompatibilityGraph(OPVertex & source, OPVertex & sink, v
     //         a2 -> a3 [dir=none, style=invisible];
     //     }
     //
-    //     subgraph Bvertices {
+    //     subgraph B_vertices {
     //         label="B";
     //             {
     //             rank=same;
@@ -686,13 +683,8 @@ inline void OP::opSaveIncompatibilityGraph(OPVertex & source, OPVertex & sink, v
             while (!sink_found) {
                 OPVertex * current = route[route_cursor];
                 for (auto & edge : current->_edges) {
-                    // //temporary!
-                    // cout << "checking " << edge->_from->_name << " -> " << edge->_to->_name << endl;
                     if (edge->_capacity > 0.0 && edge->_to->_parent_edge == nullptr) {
                         edge->_to->_parent_edge = edge;
-
-                        // //temporary!
-                        // cout << "  adding edge to route" << endl;
 
                         route.push_back(edge->_to);
                         if (edge->_to == &sink) {
@@ -701,24 +693,52 @@ inline void OP::opSaveIncompatibilityGraph(OPVertex & source, OPVertex & sink, v
                         }
                     }
                     else {
-                        bool already_visited = edge->_to->_parent_edge != nullptr;
-                        bool capacity_zero = edge->_capacity == 0.0;
+#if 1
+                        bool already_visited = static_cast<bool>(edge->_to->_parent_edge != nullptr);
+                        if (!already_visited) {
+                            // If it is a "B" vertex that has zero capacity, then the route cannot
+                            // go from this "B" vertex to the sink. It may, however, be able to go back to
+                            // an "A" vertex if that "A" vertex was not accessible from the source
+                            // and there is residual flow on the edge.
+                            if (edge->_to == &sink) {
+                                OPVertex * B_vertex = edge->_from;
+                                for (auto s_to_A_edge : source._edges) {
+                                    // edge from source to an "A" vertex
+                                    if (s_to_A_edge->_capacity == 0) {
+                                        // See if any of the "A" vertex edges lead to the "B" vertex in question
+                                        OPVertex * A_vertex = s_to_A_edge->_to;
+                                        for (unsigned k = 0; k < A_vertex->_edges.size(); k++) {
+                                            OPEdge * A_to_B_edge = A_vertex->_edges[k];  // edge from "A" to a "B" vertex
+                                            if (A_vertex->_parent_edge == nullptr && A_to_B_edge->_to == B_vertex && A_to_B_edge->_reverse_flow > 0.0) {
+                                                // If we are here, we know that:
+                                                // 1. the "A" vertex has not been visited
+                                                // 2. the "A" vertex is joined to the "B" vertex in question
+                                                // 3. the "A" vertex is not accessible from the source, and
+                                                // 4. there is residual flow on the A_to_B_edge
+
+                                                A_vertex->_parent_edge = A_to_B_edge;
+                                                A_to_B_edge->_edge_is_reversed = true;
+                                                A_vertex->_residual_capacity = A_to_B_edge->_reverse_flow;
+                                                route.push_back(A_vertex);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+#else
+                        // This code can be deleted once it is confirmed that the modification above works
+                        bool already_visited = static_cast<bool>(edge->_to->_parent_edge != nullptr);
+                        bool capacity_zero = static_cast<bool>(edge->_capacity == 0.0);
                         if (already_visited && capacity_zero) {
-                            // //temporary!
-                            // cout << "  rejected edge because capacity is zero and to-vertex already visited" << endl;
                         }
                         else if (already_visited) {
-                            // //temporary!
-                            // cout << "  rejected edge because to-vertex already visited" << endl;
                         }
                         else {
-                            // //temporary!
-                            // cout << "  rejected edge because capacity is zero" << endl;
-
                             // If it is a "B" vertex that has zero capacity, then the route cannot
-                            // go from thix "B" vertex to the sink but it may be able to go back to
+                            // go from this "B" vertex to the sink. It may, however, be able to go back to
                             // an "A" vertex if that "A" vertex was not accessible from the source
-                            // and there is residual flow on the edge
+                            // and there is residual flow on the edge.
                             if (edge->_to == &sink) {
                                 OPVertex * B_vertex = edge->_from;
                                 for (unsigned j = 0; j < source._edges.size(); j++) {
@@ -735,14 +755,6 @@ inline void OP::opSaveIncompatibilityGraph(OPVertex & source, OPVertex & sink, v
                                                 // 3. the "A" vertex is not accessible from the source, and
                                                 // 4. there is residual flow on the A_to_B_edge
 
-                                                // //temporary!
-                                                // cout << "  adding REVERSE edge to route (" << B_vertex->_name << " -> " << A_vertex->_name << ")" << endl;
-
-                                                // //temporary!
-                                                // if (A_to_B_edge->_from->_name == "a2" && A_to_B_edge->_to->_name == "b4") {
-                                                //     cerr << "*** debug breakpoint ***" << endl;
-                                                // }
-
                                                 A_vertex->_parent_edge = A_to_B_edge;
                                                 A_to_B_edge->_edge_is_reversed = true;
                                                 A_vertex->_residual_capacity = A_to_B_edge->_reverse_flow;
@@ -753,6 +765,7 @@ inline void OP::opSaveIncompatibilityGraph(OPVertex & source, OPVertex & sink, v
                                 }
                             }
                         }
+#endif
                     }
                 }
                 route_cursor++;
@@ -769,8 +782,6 @@ inline void OP::opSaveIncompatibilityGraph(OPVertex & source, OPVertex & sink, v
                 double min_capacity = 1.0;
                 OPVertex * current = &sink;
                 while (current != &source) {
-                    // //temporary!
-                    //cerr << "current = " << current->_name << endl;
                     OPEdge * edge = current->_parent_edge;
                     if (edge->_edge_is_reversed) {
                         if (edge->_reverse_flow < min_capacity) {
@@ -809,9 +820,6 @@ inline void OP::opSaveIncompatibilityGraph(OPVertex & source, OPVertex & sink, v
             }
 #if defined(OP_SAVE_DOT_FILE)
         opSaveIncompatibilityGraph(source, sink, avect, bvect);
-
-        // //temporary!
-        // cerr << "just saved dot graph" << endl;
 #endif
         }   // while (!done_augmenting_path)
 
@@ -1076,12 +1084,6 @@ inline bool OP::opRefineSupport(const Split::treeid_pair_t & AB, Split::treeid_p
         // Assign a name to avect[i]
         avect[i]._name = str(format("a%d") % i);
 
-        // //temporary!
-        // cerr << "avect[" << i << "] split: \n";
-        // for (auto v : avect[i]._split->getBits()) {
-        //     cerr << " " << v << endl;
-        // }
-
         // Create the forward edge
         all_edges.emplace_back();
         OPEdge & source_forward_edge = all_edges.back();
@@ -1127,13 +1129,7 @@ inline bool OP::opRefineSupport(const Split::treeid_pair_t & AB, Split::treeid_p
         // Assign a name to bvect[j]
         bvect[j]._name = str(format("b%d") % j);
 
-        // //temporary!
-        // cerr << "bvect[" << j << "] split: \n";
-        // for (auto v : bvect[j]._split->getBits()) {
-        //     cerr << " " << v << endl;
-        // }
-
-        // Create the forward edge
+        // Create the edge
         all_edges.emplace_back();
         OPEdge & sink_forward_edge = all_edges.back();
         sink_forward_edge._from = &bvect[j];
@@ -1479,7 +1475,7 @@ inline double OP::calcKFDistance(unsigned ref_index, unsigned test_index) const 
         refsplits.begin(), refsplits.end(),
         testsplits.begin(), testsplits.end(),
         inserter(allsplits, allsplits.begin()));
-    
+
     // Traverse allsplits, storing squared branch length differences in KLinternals
     vector<double> KLinternals(allsplits.size());
     unsigned i = 0;
@@ -1504,7 +1500,7 @@ inline double OP::calcKFDistance(unsigned ref_index, unsigned test_index) const 
             KLinternals[i++] = square;
         }
     }
-        
+
     // Create the map in which keys are taxon names and values are Node pointers
     // for the reference tree
     map<string, Node *> leafmap0;
@@ -1526,7 +1522,7 @@ for (const auto& p : leafmap0) {
         names.push_back(p.first);
     }
     sort(names.begin(), names.end());
-    
+
     // Now calculate squares for leaf nodes, storing in KLleaves
     vector<double> KLleaves(names.size());
     i = 0;
@@ -1538,7 +1534,7 @@ for (const auto& p : leafmap0) {
         double square = pow(edge_length0 - edge_length, 2.0);
         KLleaves[i++] = square;
     }
-    
+
     // Calculate KL distance
     double KLdist = 0.0;
     for (auto square : KLinternals) {
@@ -1547,25 +1543,25 @@ for (const auto& p : leafmap0) {
     for (auto square : KLleaves) {
         KLdist += square;
     }
-    
+
     return KLdist;
 }
 
 inline void OP::chooseRandomTree(TreeManip & tm, Lot & lot) const {
-    unsigned n = _tree_summary->getNumTrees();
-    unsigned index = lot.randint(0, n-1);
+    int n = static_cast<int>(_tree_summary->getNumTrees());
+    auto index = static_cast<unsigned>(lot.randint(0, n-1));
     string newick = _tree_summary->getNewick(index);
     bool rooted = _tree_summary->isRooted(index);
     assert(rooted);
     tm.buildFromNewick(newick, rooted, /*allow_polytomies*/true);
 }
 
-inline void OP::displaceTreeAlongGeodesic(TreeManip & starttree, TreeManip & endtree, double displacement) const {
-    // Move starttree a distance displacement along the geodesic from starttree to endtree
+inline void OP::displaceTreeAlongGeodesic(TreeManip & start_tree, TreeManip & end_tree, double displacement) const {
+    // Move start_tree a distance displacement along the geodesic from start_tree to end_tree
     // First, get geodesic
     vector<Split::treeid_pair_t> ABpairs;
     vector<Split::split_pair_t> commonPairs;
-    double geodesic = calcBHVDistance(starttree, endtree, ABpairs, commonPairs);
+    calcBHVDistance(start_tree, end_tree, ABpairs, commonPairs);
 
     // Support A = (A1, A2, ..., Ak) and B = (B1, B2, ..., Bk)
     // Path has i-1,2,...,k "legs"
@@ -1579,7 +1575,7 @@ inline void OP::displaceTreeAlongGeodesic(TreeManip & starttree, TreeManip & end
     //    length edge e in Ti = [lambda length(Bj) - (1-lambda) length(Aj)]/length(Bj) if e in Bj
 
     // Precalculate lengths of all segments
-    auto support_size = (unsigned)ABpairs.size();
+    auto support_size = static_cast<unsigned>(ABpairs.size());
     vector<double> lenA(support_size);
     vector<double> lenB(support_size);
     for (unsigned i = 0; i < support_size; ++i) {
@@ -1587,10 +1583,8 @@ inline void OP::displaceTreeAlongGeodesic(TreeManip & starttree, TreeManip & end
         lenB[i] = opCalcTreeIDLength(ABpairs[i].second);
     }
 
-    // Walk down ABpairs, dropping and adding splits as needed from starttree until we arrive at the destination leg
+    // Walk down ABpairs, dropping and adding splits as needed from the start_tree until we arrive at the destination leg
     double lambda = displacement;
-    Split::treeid_t splitset;
-    //double lambda_ratio = displacement/(1.0 - displacement);
     unsigned leg = 0;
     while (true) {
         double lambda_leg = 1.0;
@@ -1602,64 +1596,37 @@ inline void OP::displaceTreeAlongGeodesic(TreeManip & starttree, TreeManip & end
             break;
         }
         for (auto & asplit : ABpairs[leg].first) {
-            // Drop asplit from starttree
-            // //temporary!
-            // cout << "  Dropping split " << asplit.createPatternRepresentation() << endl;
-            starttree.dropSplit(asplit);
-            // //temporary!
-            // cout << "  tree now: " << starttree.makeNewick(5, true) << endl;
+            // Drop asplit from the start_tree
+            start_tree.dropSplit(asplit);
         }
         for (auto & bsplit : ABpairs[leg].second) {
-            // Add bsplit to starttree
-            // //temporary!
-            // cout << "  Adding split " << bsplit.createPatternRepresentation() << endl;
-            double edgelen = bsplit.getEdgeLen();
-            //edgelen *= edgelen_multiplicative_factor;
-            starttree.addSplit(bsplit);
-            // //temporary!
-            // cout << "  tree now: " << starttree.makeNewick(5, true) << endl;
+            // Add bsplit to the start_tree
+            start_tree.addSplit(bsplit);
         }
         ++leg;
     }
 
-    // //temporary!
-    // cerr << "Modifying edge lengths..." << endl;
-
     // Modify edge lengths
     for (unsigned i = 0; i < leg; ++i) {
-        // //temporary!
-        // cerr << "  i = " << i << " leg = " << leg << " ABpairs[i].second.size() = " << ABpairs[i].second.size() << endl;
-
         for (auto & bsplit : ABpairs[i].second) {
             double edgelen_multiplicative_factor = (lambda*lenB[i] - (1.0 - lambda)*lenA[i])/lenB[i];
             double edgelen = bsplit.getEdgeLen();
-
-            // //temporary!
-            // cerr << "  bsplit = " << bsplit.createPatternRepresentation() << " edgelen = " << edgelen << " edgelen_multiplicative_factor = " << edgelen_multiplicative_factor << endl;
-
-            starttree.setEdgeLength(bsplit, edgelen_multiplicative_factor*edgelen);
+            start_tree.setEdgeLength(bsplit, edgelen_multiplicative_factor*edgelen);
         }
     }
     for (unsigned i = leg; i < ABpairs.size(); ++i) {
-        // //temporary!
-        // cerr << "  i = " << i << " ABpairs.size() = " << ABpairs.size() << " ABpairs[i].first.size() = " << ABpairs[i].first.size() << endl;
-
         for (auto & asplit : ABpairs[i].first) {
             double edgelen_multiplicative_factor = ((1 - lambda)*lenA[i] - lambda*lenB[i])/lenA[i];
             double edgelen = asplit.getEdgeLen();
-
-            // //temporary!
-            // cerr << "  asplit = " << asplit.createPatternRepresentation() << " edgelen = " << edgelen << " edgelen_multiplicative_factor = " << edgelen_multiplicative_factor << endl;
-
-            starttree.setEdgeLength(asplit, edgelen_multiplicative_factor*edgelen);
+            start_tree.setEdgeLength(asplit, edgelen_multiplicative_factor*edgelen);
         }
     }
 
-    for (unsigned i = 0; i < commonPairs.size(); ++i) {
-        double from_edgelen = commonPairs[i].first.getEdgeLen();
-        double to_edgelen = commonPairs[i].second.getEdgeLen();
+    for (auto & commonPair : commonPairs) {
+        double from_edgelen = commonPair.first.getEdgeLen();
+        double to_edgelen = commonPair.second.getEdgeLen();
         double new_edgelen = from_edgelen + lambda*(to_edgelen - from_edgelen);
-        starttree.setEdgeLength(commonPairs[i].first, new_edgelen);
+        start_tree.setEdgeLength(commonPair.first, new_edgelen);
     }
 }
 
@@ -1683,8 +1650,8 @@ inline bool OP::frechetCloseEnough(vector<TreeManip> & mu, unsigned lower, unsig
     return is_close_enough;
 }
 
-inline unsigned OP::computeFrechetMean(TreeManip & meantree) const {
-    // Returns number of iterations required to compute the Frechet mean tree
+inline unsigned OP::computeFrechetMean(TreeManip & mean_tree) const {
+    // Returns the number of iterations required to compute the Frechet mean tree
     double   epsilon = _frechet_epsilon; // successive mean estimates must be at least this close to stop iterating
     unsigned N = _frechet_n;   // number of previous mean estimates that must be as close as epsilon
     unsigned K = _frechet_k; // maximum number of iterations
@@ -1692,7 +1659,7 @@ inline unsigned OP::computeFrechetMean(TreeManip & meantree) const {
     vector<TreeManip> mu;
     mu.reserve(K);// the trail of estimated mean trees (always has length k)
     Lot lot;
-    lot.setSeed(_rnseed);
+    lot.setSeed(_random_number_seed);
     mu.emplace_back();
     chooseRandomTree(mu[k-1], lot);
     bool done = false;
@@ -1701,19 +1668,7 @@ inline unsigned OP::computeFrechetMean(TreeManip & meantree) const {
         mu.emplace_back();
         assert(mu.size() == k);
         chooseRandomTree(mu[k-1], lot);
-
-        // //temporary!
-        // cerr << "k = " << k << endl;
-        // cerr << "  mu[k-1] = " << mu[k-1].makeNewick(5) << endl;
-        // cerr << "  ----- " << k << "/" << (k+1) << " ---->" << endl;
-        // cerr << "  mu[k-2] = " << mu[k-2].makeNewick(5) << endl;
-
         displaceTreeAlongGeodesic(mu[k-1], mu[k-2], 1.0*k/(k+1));
-
-        // //temporary!
-        // cerr << "  mu[k-1] = " << mu[k-1].makeNewick(5) << endl;
-        // cerr << endl;
-
         if (k >= K) {
             done = true;
         }
@@ -1721,7 +1676,7 @@ inline unsigned OP::computeFrechetMean(TreeManip & meantree) const {
             done = frechetCloseEnough(mu, k-N, k, epsilon);
         }
     }
-    meantree.setTree(mu[k-1].getTree());
+    mean_tree.setTree(mu[k-1].getTree());
     return k;
 }
 
@@ -1774,10 +1729,10 @@ inline void OP::run() {
 
             // Save the tree at _distance_lambda from the starting tree toward the ending tree
             string fn = boost::str(format("tree-at-lambda-%.5f.txt") % _distance_lambda);
-            ofstream midf(fn);
-            midf << starttm.makeNewick(9) << endl;
-            midf << "# lambda = " << setprecision(9) << _distance_lambda << endl;
-            midf.close();
+            ofstream middle_file(fn);
+            middle_file << starttm.makeNewick(9) << endl;
+            middle_file << "# lambda = " << setprecision(9) << _distance_lambda << endl;
+            middle_file.close();
 
             if (!_quiet) {
                 cout << "Tree at lambda = " << setprecision(5) << _distance_lambda << ":" << endl;
@@ -1788,12 +1743,12 @@ inline void OP::run() {
         }
 
         if (_frechet_mean) {
-            TreeManip meantree;
+            TreeManip mean_tree;
             if (!_quiet)
                 cout << "Computing Frechet mean tree..." << endl;
 
             // Compute the mean
-            unsigned niters = computeFrechetMean(meantree);
+            unsigned number_of_iterations = computeFrechetMean(mean_tree);
 
             // Compute the variance
             double variance = 0.0;
@@ -1802,7 +1757,7 @@ inline void OP::run() {
                 buildTree(i, tm);
                 vector<Split::treeid_pair_t> ABpairs;
                 vector<Split::split_pair_t> commonPairs;
-                double bhvdist = calcBHVDistance(meantree, tm, ABpairs, commonPairs);
+                double bhvdist = calcBHVDistance(mean_tree, tm, ABpairs, commonPairs);
                 variance += bhvdist*bhvdist;
                 //outf << (i+1) << '\t' << setprecision(static_cast<int>(_precision)) << bhvdist << '\n';
             }
@@ -1810,19 +1765,19 @@ inline void OP::run() {
 
             // Save the mean tree and variance
             string fn = _frechet_prefix + ".txt";
-            ofstream meanf(fn);
-            meanf << meantree.makeNewick(9) << endl;
-            meanf << "# variance = " << setprecision(9) << variance << endl;
-            meanf << "# tree length = " << setprecision(9) << meantree.calcTreeLength() << endl;
-            meanf << "# iterations = " << niters << endl;
-            meanf.close();
+            ofstream mean_file(fn);
+            mean_file << mean_tree.makeNewick(9) << endl;
+            mean_file << "# variance = " << setprecision(9) << variance << endl;
+            mean_file << "# tree length = " << setprecision(9) << mean_tree.calcTreeLength() << endl;
+            mean_file << "# iterations = " << number_of_iterations << endl;
+            mean_file.close();
 
             if (!_quiet) {
-                cout << boost::str(format("%d iterations required (of %d max. iterations):") % niters % _frechet_k) << endl;
+                cout << boost::str(format("%d iterations required (of %d max. iterations):") % number_of_iterations % _frechet_k) << endl;
                 cout << "Mean tree:" << endl;
-                cout << meantree.makeNewick(9) << endl;
+                cout << mean_tree.makeNewick(9) << endl;
                 cout << "Variance = " << variance << endl;
-                cout << "Tree length = " << setprecision(9) << meantree.calcTreeLength() << endl;
+                cout << "Tree length = " << setprecision(9) << mean_tree.calcTreeLength() << endl;
             }
 
             if (!_quiet)
@@ -1850,7 +1805,7 @@ inline void OP::run() {
         if (!_quiet)
             cout << "Writing KF distances to file \"kfdists.txt\"" << endl;
         ofstream outf("kfdists.txt");
-        outf << "tree	distance to tree 1" << endl;
+        outf << "tree distance to tree 1" << endl;
         for (unsigned i = 1; i < ntrees; i++) {
             double kfss = calcKFDistance(0, i);
             double kfdist = sqrt(kfss);
