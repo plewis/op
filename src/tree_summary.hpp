@@ -26,8 +26,9 @@ namespace op
                                         TreeSummary();
                                         ~TreeSummary();
 
-            void                        readRevBayesTreefile(const string filename, unsigned skip);
-            void                        readTreefile(const string filename, unsigned skip);
+            string                      scaleEdgeLengths(const string & newick, double scaler);
+            void                        readRevBayesTreefile(const string filename, unsigned skip, double scaler);
+            void                        readTreefile(const string filename, unsigned skip, double scaler);
             //void                        showSummary() const;
             unsigned                    getNumTrees() const;
             typename Tree::SharedPtr    getTree(unsigned index);
@@ -87,13 +88,19 @@ inline string TreeSummary::getNewick(unsigned index) {
         return _newicks[index];
 }
 
-inline void TreeSummary::clear()
-    {
+inline void TreeSummary::clear() {
     //_treeIDs.clear();
     _newicks.clear();
     }
 
-inline void TreeSummary::readRevBayesTreefile(const string filename, unsigned skip) {
+inline string TreeSummary::scaleEdgeLengths(const string & newick, double scaler) {
+    TreeManip tm;
+    tm.buildFromNewick(newick, false, true);
+    tm.scaleAllEdgeLengths(scaler);
+    return tm.makeNewick(9);
+}
+
+inline void TreeSummary::readRevBayesTreefile(const string filename, unsigned skip, double scaler) {
     ifstream inf(filename.c_str());
     stringstream buffer;
     buffer << inf.rdbuf();
@@ -108,8 +115,18 @@ inline void TreeSummary::readRevBayesTreefile(const string filename, unsigned sk
     auto nparts = (unsigned)parts.size();
 
     // Assuming this is indeed a RevBayes tree file
-    assert(nparts == 5);
-    assert(parts[4] == "psi");
+    bool is_combined_treefile = false;
+    if (nparts == 5) {
+        if (parts[4] != "psi") {
+            throw Xop("Expecting 5th column of RevBayes tree file to be labeled \"psi\"");
+        }
+    }
+    else if (nparts == 6) {
+        if (parts[5] != "psi") {
+            throw Xop("Expecting 6th column of RevBayes combined tree file to be labeled \"psi\"");
+        }
+        is_combined_treefile = true;
+    }
 
     TreeManip tm;
     unsigned nskipped = 0;
@@ -120,15 +137,20 @@ inline void TreeSummary::readRevBayesTreefile(const string filename, unsigned sk
         else {
             boost::algorithm::split(parts, line, boost::is_any_of("\t"));
             nparts = (unsigned)parts.size();
-            assert(nparts == 5);
+            assert((is_combined_treefile && nparts == 6) || nparts == 5);
             _is_rooted.push_back(true);
-            string & newick = parts[4];
-            _newicks.emplace_back(newick);
+            string & newick = parts[is_combined_treefile ? 5 : 4];
+            if (scaler == 1.0) {
+                _newicks.emplace_back(newick);
+            }
+            else {
+                _newicks.emplace_back(scaleEdgeLengths(newick, scaler));
+            }
         }
     }
 }
 
-inline void TreeSummary::readTreefile(const string filename, unsigned skip)
+inline void TreeSummary::readTreefile(const string filename, unsigned skip, double scaler)
     {
     TreeManip tm;
     Split::treeid_t splitset;
@@ -209,7 +231,12 @@ inline void TreeSummary::readTreefile(const string filename, unsigned skip)
 
                     // store the newick tree description
                     string newick = d.GetNewick();;
-                    _newicks.push_back(newick);
+                    if (scaler == 1.0) {
+                        _newicks.push_back(newick);
+                    }
+                    else {
+                        _newicks.push_back(scaleEdgeLengths(newick, scaler));
+                    }
 
                     //unsigned tree_index = (unsigned)_newicks.size() - 1;
 
