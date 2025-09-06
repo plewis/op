@@ -166,7 +166,9 @@ inline void OP::processCommandLineOptions(int argc, const char * argv[]) {
         program_options::store(parsed, vm);
     }
     catch(program_options::reading_file &) {
-        cout << "Note: configuration file (op.conf) not found" << endl;
+        if (!_quiet) {
+            cout << "Note: configuration file (op.conf) not found" << endl;
+        }
     }
     program_options::notify(vm);
 
@@ -1331,7 +1333,7 @@ inline double OP::calcBHVDistance(
         vector<Split::split_pair_t> & commonPairs) const {
     ABpairs.clear();
 
-    // Store splits from the reference tree
+    // Store splits from the starting tree
     Split::treeid_t A0;
     Split::treeid_t Alvs;
     starttm.storeSplits(A0, Alvs);
@@ -1342,6 +1344,10 @@ inline double OP::calcBHVDistance(
         if (a.getEdgeLen() > 0.0) {
             A.insert(a);
         }
+        else {
+            // Drop this split because it has an edge length of zero
+            starttm.dropSplit(a); //TODO: is this OK?
+        }
     }
 
     if (!_quiet) {
@@ -1351,7 +1357,7 @@ inline double OP::calcBHVDistance(
         }
     }
 
-    // Store splits from the reference tree
+    // Store splits from the ending tree
     Split::treeid_t B0;
     Split::treeid_t Blvs;
     endtm.storeSplits(B0, Blvs);
@@ -1361,6 +1367,10 @@ inline double OP::calcBHVDistance(
     for (auto & b : B0) {
         if (b.getEdgeLen() > 0.0) {
             B.insert(b);
+        }
+        else {
+            // Drop this split because it has an edge length of zero
+            endtm.dropSplit(b); //TODO: is this OK?
         }
     }
 
@@ -1668,6 +1678,13 @@ inline unsigned OP::computeFrechetMean(TreeManip & mean_tree) const {
         mu.emplace_back();
         assert(mu.size() == k);
         chooseRandomTree(mu[k-1], lot);
+
+        //temporary
+        if (k == 9975) {
+            cerr << "mu[9974] = " << mu[9974].makeNewick(9) << endl;
+            cerr << "mu[9973] = " << mu[9973].makeNewick(9) << endl;
+        }
+
         displaceTreeAlongGeodesic(mu[k-1], mu[k-2], 1.0*k/(k+1));
         if (k >= K) {
             done = true;
