@@ -1778,9 +1778,9 @@ inline void OP::run() {
             string fn = _frechet_prefix + ".txt";
             ofstream mean_file(fn);
             mean_file << mean_tree.makeNewick(9) << endl;
-            mean_file << "# variance = " << setprecision(9) << variance << endl;
-            mean_file << "# tree length = " << setprecision(9) << mean_tree.calcTreeLength() << endl;
-            mean_file << "# iterations = " << number_of_iterations << endl;
+            mean_file << boost::str(boost::format("# variance = %.9f\n") % variance);
+            mean_file << boost::str(boost::format("# tree length = %.9f\n") % mean_tree.calcTreeLength());
+            mean_file << boost::str(boost::format("# iterations = %d\n") % number_of_iterations);
             mean_file.close();
 
             if (!_quiet) {
