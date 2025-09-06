@@ -1679,12 +1679,6 @@ inline unsigned OP::computeFrechetMean(TreeManip & mean_tree) const {
         assert(mu.size() == k);
         chooseRandomTree(mu[k-1], lot);
 
-        //temporary
-        if (k == 9975) {
-            cerr << "mu[9974] = " << mu[9974].makeNewick(9) << endl;
-            cerr << "mu[9973] = " << mu[9973].makeNewick(9) << endl;
-        }
-
         displaceTreeAlongGeodesic(mu[k-1], mu[k-2], 1.0*k/(k+1));
         if (k >= K) {
             done = true;
