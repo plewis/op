@@ -16,6 +16,8 @@ public:
 
 private:
 
+    void rPlotDists(vector<double> & dists, string & rscript, double & hpd_lower, double & hpd_upper, double hpd_level);
+
     void buildTree(unsigned tree_index, TreeManip & tm) const;
     double calcBHVDistance(
         TreeManip & starttm,
@@ -1691,6 +1693,25 @@ inline unsigned OP::computeFrechetMean(TreeManip & mean_tree) const {
     return k;
 }
 
+inline void OP::rPlotDists(vector<double> & dists, string & rscript, double & hpd_lower, double & hpd_upper, double hpd_level) {
+    assert(dists.size() > 0);
+    sort(dists.begin(), dists.end(), greater<double>());
+    unsigned cutoff = static_cast<unsigned>(dists.size() * hpd_level);
+    hpd_lower = *min_element(dists.begin(), dists.begin() + cutoff);
+    hpd_upper = *max_element(dists.begin(), dists.begin() + cutoff);
+    rscript = "cwd = system('cd \"$( dirname \"$0\" )\" && pwd', intern = TRUE)\n";
+    rscript += "setwd(cwd)\n";
+    rscript += R"(pdf(\"density.pdf\")\n)";
+    rscript += str(format("d <- c(%.9f") % dists[0]);
+    for (unsigned i = 1; i < dists.size(); ++i) {
+        rscript += str(format(", %.9f") % dists[i]);
+    }
+    rscript += R"();\n)";
+    rscript += R"(dd <- density(d)\n)";
+    rscript += R"(plot(dd, type='l', bty="n", "xlab='Distance', ylab='Density', main='Distribution of distances');\n)";
+    rscript += R"(dev.off()\n)";
+}
+
 inline void OP::run() {
     try {
         // Read in trees
@@ -1763,6 +1784,7 @@ inline void OP::run() {
 
             // Compute the variance
             double variance = 0.0;
+            vector<double> bhvdists(ntrees, 0.0);
             for (unsigned i = 0; i < ntrees; i++) {
                 TreeManip tm;
                 buildTree(i, tm);
@@ -1770,6 +1792,7 @@ inline void OP::run() {
                 vector<Split::split_pair_t> commonPairs;
                 double bhvdist = calcBHVDistance(mean_tree, tm, ABpairs, commonPairs);
                 variance += bhvdist*bhvdist;
+                bhvdists[i] = bhvdist;
                 //outf << (i+1) << '\t' << setprecision(static_cast<int>(_precision)) << bhvdist << '\n';
             }
             variance /= (ntrees - 1);
@@ -1781,6 +1804,13 @@ inline void OP::run() {
             mean_file << boost::str(boost::format("# variance = %.9f\n") % variance);
             mean_file << boost::str(boost::format("# tree length = %.9f\n") % mean_tree.calcTreeLength());
             mean_file << boost::str(boost::format("# iterations = %d\n") % number_of_iterations);
+            string rscript;
+            double hpd_lower;
+            double hpd_upper;
+            rPlotDists(bhvdists, rscript, hpd_lower, hpd_upper, 0.95);
+            mean_file << boost::str(boost::format("# HPD lower = %.9f\n") % hpd_lower);
+            mean_file << boost::str(boost::format("# HPD upper = %.9f\n") % hpd_upper);
+            mean_file << "\n" << rscript << endl;
             mean_file.close();
 
             if (!_quiet) {
