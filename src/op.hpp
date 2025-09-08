@@ -1777,12 +1777,12 @@ inline void OP::testKDE() {
 inline void OP::calcBandWidth(const vector<double> & sample) {
     // Assumes sample is already sorted from lowest to highest value
     // Calculate IQR (InterQuartile Range)
-    auto n = (double)sample.size();
+    auto n = static_cast<unsigned>(sample.size());
 
     // Calculate the 0.25 quantile
     double p = 0.25;
     double k = p*(n - 1.0) + 1.0;
-    unsigned ki = static_cast<unsigned>(floor(k));
+    auto ki = static_cast<unsigned>(floor(k));
     _kde_q25 = sample[ki - 1];
     if (k != ki) {
         // k is not an integer, so interpolate
@@ -1813,7 +1813,7 @@ inline void OP::calcBandWidth(const vector<double> & sample) {
     double varx = (sumxsq - n*pow(meanx, 2.0))/(n-1);
     _kde_sigma = sqrt(varx);
 
-    // Calculate the rule-of-thumb band width
+    // Calculate the rule-of-thumb bandwidth
     double A = min(_kde_sigma, IQR/1.34);
     _kde_bandwidth = 0.9*A*pow(n, -0.2);
 }
@@ -1821,7 +1821,7 @@ inline void OP::calcBandWidth(const vector<double> & sample) {
 inline double OP::kernelDensity(double x, const vector<double> & sample) const {
     if (x <= 0.0)
         return 0.0;
-    double n = (double)sample.size();
+    auto n = static_cast<double>(sample.size());
     double sigma = 1.0; //_kde_sigma;
     double numer = 0.0;
     for (double xi : sample) {
@@ -1836,15 +1836,15 @@ inline double OP::kernelDensity(double x, const vector<double> & sample) const {
 inline void OP::rPlotDists(vector<double> & dists, string & rscript, double & hpd_lower, double & hpd_upper, double hpd_level) {
     assert(dists.size() > 0);
 
-    // Create data set mirrored across the lower boundary 0.0
+    // Create a data set mirrored across the lower boundary 0.0
     auto n = static_cast<unsigned>(dists.size());
-    vector<double> mirrored(n);
+    vector<double> mirrored(2*n);
     for (unsigned i = 0; i < n; ++i) {
         mirrored[i] = dists[i];
         mirrored[i+n] = -1.0*dists[i];
     }
 
-    // Calculate the band width for kernel density estimation
+    // Calculate the bandwidth for kernel density estimation
     sort(mirrored.begin(), mirrored.end());
     calcBandWidth(mirrored);
 
@@ -1856,11 +1856,11 @@ inline void OP::rPlotDists(vector<double> & dists, string & rscript, double & hp
         density_dist.emplace_back(d1+d2, x);
     }
 
-    // Sort unmirrored vector from highest density to lowest
+    // Sort unmirrored vector from the highest density to the lowest
     sort(density_dist.begin(), density_dist.end(), greater<pair<double, double> >());
 
-    // Find cutoff such that unmirrored[1..cutoff] constitutes HPD
-    unsigned cutoff = static_cast<unsigned>(density_dist.size() * hpd_level);
+    // Find cutoff such that indices 0 to cutoff constitute the HPD
+    auto cutoff = static_cast<unsigned>(floor(static_cast<double>(density_dist.size()) * hpd_level));
 
     // Initialize hpd_lower to largest distance
     hpd_lower = *max_element(dists.begin(), dists.begin());
