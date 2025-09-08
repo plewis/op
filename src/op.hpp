@@ -117,7 +117,6 @@ private:
 
 inline OP::OP() :
     _quiet(true),
-    _test_kde(false),
     _output_for_gtp(false),
     _frechet_prefix("mean-and-variance"),
     _frechet_mean(false),
@@ -129,7 +128,12 @@ inline OP::OP() :
     _tree_summary(nullptr),
     _frechet_epsilon(0.001),
     _frechet_n(5),
-    _frechet_k(100) {
+    _frechet_k(100),
+    _kde_bandwidth(0.0),
+    _kde_sigma(0.0),
+    _kde_q25(0.0),
+    _kde_q75(0.0),
+    _test_kde(false) {
     //cout << "Constructing a SStrom" << endl;
 }
 
