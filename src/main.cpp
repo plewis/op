@@ -17,7 +17,9 @@ using namespace std;
 #include <boost/random/uniform_real.hpp>
 #include <boost/random/variate_generator.hpp>
 #include <boost/algorithm/string/split.hpp>
+#include <boost/algorithm/string/join.hpp>
 #include <boost/algorithm/string/classification.hpp>
+#include <boost/math/special_functions/gamma.hpp>
 
 #include "split.hpp"
 #include "node.hpp"

@@ -16,6 +16,9 @@ public:
 
 private:
 
+    void testKDE();
+    void calcBandWidth(const vector<double> & sample);
+    double kernelDensity(double x, const vector<double> & sample) const;
     void rPlotDists(vector<double> & dists, string & rscript, double & hpd_lower, double & hpd_upper, double hpd_level);
 
     void buildTree(unsigned tree_index, TreeManip & tm) const;
@@ -96,6 +99,12 @@ private:
         unsigned                _frechet_n;
         unsigned                _frechet_k;
 
+        double                  _kde_bandwidth;
+        double                  _kde_sigma;
+        double                  _kde_q25;
+        double                  _kde_q75;
+        bool                    _test_kde;
+
         static string           _program_name;
         static unsigned         _major_version;
         static unsigned         _minor_version;
@@ -108,6 +117,7 @@ private:
 
 inline OP::OP() :
     _quiet(true),
+    _test_kde(false),
     _output_for_gtp(false),
     _frechet_prefix("mean-and-variance"),
     _frechet_mean(false),
@@ -161,6 +171,7 @@ inline void OP::processCommandLineOptions(int argc, const char * argv[]) {
         ("quiet,q", program_options::value(&_quiet), "suppress all output except for errors (default: yes)")
         ("seed", program_options::value(&_random_number_seed), "pseudorandom number generator seed (used only when estimating mean tree)")
         ("scale", program_options::value(&_scale_by), "rescale all input trees by this multiplicative factor (default: 1.0)")
+        ("testkde", program_options::value(&_test_kde), "test kernel density estimation")
         ;
     program_options::store(program_options::parse_command_line(argc, argv, desc), vm);
     try {
@@ -183,13 +194,19 @@ inline void OP::processCommandLineOptions(int argc, const char * argv[]) {
     // If the user specified --version on the command line, output the version and quit
     if (vm.count("version") > 0) {
         cout << str(format("This is %s version %d.%d") % _program_name % _major_version % _minor_version) << endl;
-        exit(1);
+        exit(0);
+    }
+
+    // If the user specified --testkde on the command line, run testKDE() and quit
+    if (vm.count("testkde") > 0) {
+        testKDE();
+        exit(0);
     }
 
     // If the user failed to specify --treefile on the command line, bail out because a treefile is needed for
     // anything except help and version
     if (vm.count("treefile") == 0) {
-        cout << "You must specify a treefile if doing anything except --help or --version" << endl;
+        cout << "You must specify a treefile if doing anything except --help, --version, or --testkde" << endl;
         exit(1);
     }
 
@@ -1693,23 +1710,195 @@ inline unsigned OP::computeFrechetMean(TreeManip & mean_tree) const {
     return k;
 }
 
+inline void OP::testKDE() {
+    // Initialize pseudorandom number generator
+    Lot lot;
+    lot.setSeed(12345);
+
+    // Simulate Gamma(shape, scale) data
+    double shape = 2.0;
+    double scale = 3.0;
+    unsigned sample_size = 1000;
+    vector<double> sample(sample_size);
+    for (unsigned i = 0; i < sample_size; ++i) {
+        sample[i] = lot.gamma(shape,scale);
+    }
+
+    // Calculate _kde_sigma and _kde_band_width
+    sort(sample.begin(), sample.end());
+    calcBandWidth(sample);
+
+    // Save x, true density of x, KDE of x to a file suitable for use with both R and Tracer
+    double min_xvalue = 0.0;
+    double max_xvalue = 10.0;
+    unsigned n = 10000;
+    double incr = (max_xvalue - min_xvalue)/n;
+    vector<string> x(n);
+    vector<string> ptrue(n);
+    vector<string> pkde(n);
+    double xvalue = 0.0;
+    for (unsigned i = 0; i < n; ++i) {
+        double kde = kernelDensity(xvalue, sample);
+        double true_density = 0.0;
+        if (xvalue > 0.0) {
+            double logf = (shape - 1.0)*log(xvalue) - xvalue/scale - shape*log(scale) - boost::math::lgamma(shape);
+            true_density = exp(logf);
+        }
+        x[i] = str(format("%0.9f") % xvalue);
+        ptrue[i] = str(format("%0.9f") % true_density);
+        pkde[i] = str(format("%0.9f") % kde);
+        xvalue += incr;
+    }
+
+    vector<string> xsampled(sample_size);
+    for (unsigned i = 0; i < sample_size; ++i) {
+        xsampled[i] = str(format("%0.9f") % sample[i]);
+    }
+
+    ofstream outf("kde_test.R");
+    outf << "x <- c(" << boost::join(x, ", ") << ")\n";
+    outf << "ptrue <- c(" << boost::join(ptrue, ", ") << ")\n";
+    outf << "pkde <- c(" << boost::join(pkde, ", ") << ")\n";
+    outf << "xsampled <- c(" << boost::join(xsampled, ", ") << ")\n";
+    outf << "plot(x, ptrue, type=\"l\", lty=\"solid\", lwd=1, col=\"navy\", xlab=\"x\", ylab=\"density\", main=\"KDE test\")\n";
+    outf << "lines(x, pkde, lty=\"solid\", lwd=5, col=\"red\")\n";
+    outf << "lines(density(xsampled), lty=\"solid\", lwd=3, col=\"green\")\n";
+    outf << "quantile(xsampled, probs = c(0.25, 0.50, 0.75), type = 7)\n";
+    outf.close();
+
+    cerr << "File \"kde_test.R\" has been saved." << endl;
+}
+
+
+inline void OP::calcBandWidth(const vector<double> & sample) {
+    // Assumes sample is already sorted from lowest to highest value
+    // Calculate IQR (InterQuartile Range)
+    auto n = (double)sample.size();
+
+    // Calculate the 0.25 quantile
+    double p = 0.25;
+    double k = p*(n - 1.0) + 1.0;
+    unsigned ki = static_cast<unsigned>(floor(k));
+    _kde_q25 = sample[ki - 1];
+    if (k != ki) {
+        // k is not an integer, so interpolate
+        unsigned kiplus1 = ki + 1;
+        _kde_q25 = (sample[ki-1] + (k - ki)*(sample[kiplus1-1] - sample[ki-1]));
+    }
+
+    // Calculate the 0.75 quantile
+    p = 0.75;
+    k = p*(n - 1.0) + 1.0;
+    ki = static_cast<unsigned>(floor(k));
+    _kde_q75 = sample[ki - 1];
+    if (k != ki) {
+        // k is not an integer, so interpolate
+        unsigned kiplus1 = ki + 1;
+        _kde_q75 = (sample[ki-1] + (k - ki)*(sample[kiplus1-1] - sample[ki-1]));
+    }
+    double IQR = _kde_q75 - _kde_q25;
+
+    // Calculate the sample standard deviation
+    double sumx = 0.0;
+    double sumxsq = 0.0;
+    for (double xi : sample) {
+        sumx += xi;
+        sumxsq += pow(xi, 2.0);
+    }
+    double meanx = sumx/n;
+    double varx = (sumxsq - n*pow(meanx, 2.0))/(n-1);
+    _kde_sigma = sqrt(varx);
+
+    // Calculate the rule-of-thumb band width
+    double A = min(_kde_sigma, IQR/1.34);
+    _kde_bandwidth = 0.9*A*pow(n, -0.2);
+}
+
+inline double OP::kernelDensity(double x, const vector<double> & sample) const {
+    if (x <= 0.0)
+        return 0.0;
+    double n = (double)sample.size();
+    double sigma = 1.0; //_kde_sigma;
+    double numer = 0.0;
+    for (double xi : sample) {
+        double term = (x - xi)/(_kde_bandwidth*sigma);
+        numer += exp(-0.5*pow( term, 2 ));
+    }
+    double denom = n*_kde_bandwidth*sigma*sqrt(2.0*M_PI);
+    double f = numer/denom;
+    return f;
+}
+
 inline void OP::rPlotDists(vector<double> & dists, string & rscript, double & hpd_lower, double & hpd_upper, double hpd_level) {
     assert(dists.size() > 0);
-    sort(dists.begin(), dists.end(), greater<double>());
-    unsigned cutoff = static_cast<unsigned>(dists.size() * hpd_level);
-    hpd_lower = *min_element(dists.begin(), dists.begin() + cutoff);
-    hpd_upper = *max_element(dists.begin(), dists.begin() + cutoff);
+
+    // Create data set mirrored across the lower boundary 0.0
+    auto n = static_cast<unsigned>(dists.size());
+    vector<double> mirrored(n);
+    for (unsigned i = 0; i < n; ++i) {
+        mirrored[i] = dists[i];
+        mirrored[i+n] = -1.0*dists[i];
+    }
+
+    // Calculate the band width for kernel density estimation
+    sort(mirrored.begin(), mirrored.end());
+    calcBandWidth(mirrored);
+
+    // Create a vector containing (density, dist) tuples for every element of dists
+    vector<pair<double, double> > density_dist;
+    for (double x : dists) {
+        double d1 = kernelDensity(x, mirrored);
+        double d2 = kernelDensity(-x, mirrored);
+        density_dist.emplace_back(d1+d2, x);
+    }
+
+    // Sort unmirrored vector from highest density to lowest
+    sort(density_dist.begin(), density_dist.end(), greater<pair<double, double> >());
+
+    // Find cutoff such that unmirrored[1..cutoff] constitutes HPD
+    unsigned cutoff = static_cast<unsigned>(density_dist.size() * hpd_level);
+
+    // Initialize hpd_lower to largest distance
+    hpd_lower = *max_element(dists.begin(), dists.begin());
+
+    // Initialize hpd_upper to smallest distance
+    hpd_upper = *min_element(dists.begin(), dists.begin());
+
+    // Find hpd_lower and hpd_upper
+    for (unsigned i = 0; i < cutoff; ++i) {
+        if (density_dist[i].second < hpd_lower) {
+            hpd_lower = density_dist[i].second;
+        }
+        if (density_dist[i].second > hpd_upper) {
+            hpd_upper = density_dist[i].second;
+        }
+    }
+
     rscript = "cwd = system('cd \"$( dirname \"$0\" )\" && pwd', intern = TRUE)\n";
     rscript += "setwd(cwd)\n";
-    rscript += R"(pdf(\"density.pdf\")\n)";
-    rscript += str(format("d <- c(%.9f") % dists[0]);
-    for (unsigned i = 1; i < dists.size(); ++i) {
-        rscript += str(format(", %.9f") % dists[i]);
+    rscript += "pdf(\"density.pdf\")\n";
+
+    // Save distances to R variable d
+    rscript += str(format("d <- c(%.9f") % density_dist[0].second);
+    for (unsigned i = 1; i < density_dist.size(); ++i) {
+        rscript += str(format(", %.9f") % density_dist[i].second);
     }
-    rscript += R"();\n)";
-    rscript += R"(dd <- density(d)\n)";
-    rscript += R"(plot(dd, type='l', bty="n", "xlab='Distance', ylab='Density', main='Distribution of distances');\n)";
-    rscript += R"(dev.off()\n)";
+    rscript += ");\n";
+
+    // Save kernel densities to R variable fd
+    rscript += str(format("fd <- c(%.9f") % density_dist[0].first);
+    for (unsigned i = 1; i < density_dist.size(); ++i) {
+        rscript += str(format(", %.9f") % density_dist[i].first);
+    }
+    rscript += ");\n";
+
+    rscript += "dd <- density(d)\n";
+    rscript += "plot(dd, type=\"l\", bty=\"n\", xlab=\"Distance\", ylab=\"Density\", main=\"Distribution of distances\");\n";
+    rscript += "#points(d, fd, col=\"red\");\n";
+    rscript += str(format("included <- dd$x > %g & dd$x < %g\n") % hpd_lower % hpd_upper);
+    rscript += str(format("polygon(c(%g, dd$x[included], %g), c(0, dd$y[included], 0), density=NULL, col=\"lavender\");\n") % hpd_lower % hpd_upper);
+    rscript += "cat(sprintf(\"bandwidth = %g\\n\", dd$bw))\n";
+    rscript += "dev.off()\n";
 }
 
 inline void OP::run() {
@@ -1800,7 +1989,7 @@ inline void OP::run() {
             // Save the mean tree and variance
             string fn = _frechet_prefix + ".txt";
             ofstream mean_file(fn);
-            mean_file << mean_tree.makeNewick(9) << endl;
+            mean_file << "# " << mean_tree.makeNewick(9) << endl;
             mean_file << boost::str(boost::format("# variance = %.9f\n") % variance);
             mean_file << boost::str(boost::format("# tree length = %.9f\n") % mean_tree.calcTreeLength());
             mean_file << boost::str(boost::format("# iterations = %d\n") % number_of_iterations);
@@ -1808,8 +1997,13 @@ inline void OP::run() {
             double hpd_lower;
             double hpd_upper;
             rPlotDists(bhvdists, rscript, hpd_lower, hpd_upper, 0.95);
-            mean_file << boost::str(boost::format("# HPD lower = %.9f\n") % hpd_lower);
-            mean_file << boost::str(boost::format("# HPD upper = %.9f\n") % hpd_upper);
+            mean_file << boost::str(boost::format("# q25 = %.9f\n") % _kde_q25);
+            mean_file << boost::str(boost::format("# q75 = %.9f\n") % _kde_q75);
+            mean_file << boost::str(boost::format("# IQR = %.9f\n") % (_kde_q75 - _kde_q25));
+            mean_file << boost::str(boost::format("# KDE sigma = %.9f\n") % _kde_sigma);
+            mean_file << boost::str(boost::format("# KDE bandwidth = %.9f\n") % _kde_bandwidth);
+            mean_file << boost::str(boost::format("# 95%% HPD lower = %.9f\n") % hpd_lower);
+            mean_file << boost::str(boost::format("# 95%% HPD upper = %.9f\n") % hpd_upper);
             mean_file << "\n" << rscript << endl;
             mean_file.close();
 
