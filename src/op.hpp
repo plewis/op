@@ -1855,7 +1855,7 @@ inline void OP::rPlotDists(vector<double> & dists, string & rscript, double & hp
         double d2 = kernelDensity(-x, mirrored);
         density_dist.emplace_back(d1+d2, x);
     }
-
+    
     // Sort unmirrored vector from the highest density to the lowest
     sort(density_dist.begin(), density_dist.end(), greater<pair<double, double> >());
 
@@ -1907,12 +1907,17 @@ inline void OP::rPlotDists(vector<double> & dists, string & rscript, double & hp
 
 inline void OP::run() {
     try {
+        bool move_along_path = static_cast<bool>(_distance_lambda >= 0.0 && _distance_lambda <= 1.0);
+        bool noscale_first = false;
+        if (!_output_for_gtp && !move_along_path && !_frechet_mean)
+                noscale_first = true;
+
         // Read in trees
         _tree_summary = std::make_shared<TreeSummary>();
-        _tree_summary->readTreefile(_tree_file_name, _skip, _scale_by);
+        _tree_summary->readTreefile(_tree_file_name, _skip, _scale_by, noscale_first);
         unsigned ntrees = _tree_summary->getNumTrees();
         if (ntrees == 0) {
-            _tree_summary->readRevBayesTreefile(_tree_file_name, _skip, _scale_by);
+            _tree_summary->readRevBayesTreefile(_tree_file_name, _skip, _scale_by, noscale_first);
             ntrees = _tree_summary->getNumTrees();
         }
         if (ntrees < 2) {
@@ -1936,7 +1941,7 @@ inline void OP::run() {
             return;
         }
 
-        if (_distance_lambda >= 0.0 && _distance_lambda <= 1.0) {
+        if (move_along_path) {
             if (!_quiet)
                 cout << "Computing tree at lambda = " << setprecision(5) << _distance_lambda << "..." << endl;
 
@@ -2024,6 +2029,7 @@ inline void OP::run() {
             return;
         }
 
+        // Compute the geodesic distance between the first tree and all others
         if (!_quiet)
             cout << "Writing geodesic distances to file \"bhvdists.txt\"" << endl;
         ofstream outf("bhvdists.txt");

@@ -27,8 +27,8 @@ namespace op
                                         ~TreeSummary();
 
             string                      scaleEdgeLengths(const string & newick, double scaler);
-            void                        readRevBayesTreefile(const string filename, unsigned skip, double scaler);
-            void                        readTreefile(const string filename, unsigned skip, double scaler);
+            void                        readRevBayesTreefile(const string filename, unsigned skip, double scaler, bool noscale_first);
+            void                        readTreefile(const string filename, unsigned skip, double scaler, bool noscale_first);
             //void                        showSummary() const;
             unsigned                    getNumTrees() const;
             typename Tree::SharedPtr    getTree(unsigned index);
@@ -100,7 +100,7 @@ inline string TreeSummary::scaleEdgeLengths(const string & newick, double scaler
     return tm.makeNewick(9);
 }
 
-inline void TreeSummary::readRevBayesTreefile(const string filename, unsigned skip, double scaler) {
+inline void TreeSummary::readRevBayesTreefile(const string filename, unsigned skip, double scaler, bool noscale_first) {
     ifstream inf(filename.c_str());
     stringstream buffer;
     buffer << inf.rdbuf();
@@ -140,7 +140,7 @@ inline void TreeSummary::readRevBayesTreefile(const string filename, unsigned sk
             assert((is_combined_treefile && nparts == 6) || nparts == 5);
             _is_rooted.push_back(true);
             string & newick = parts[is_combined_treefile ? 5 : 4];
-            if (scaler == 1.0) {
+            if (noscale_first || scaler == 1.0) {
                 _newicks.emplace_back(newick);
             }
             else {
@@ -150,7 +150,7 @@ inline void TreeSummary::readRevBayesTreefile(const string filename, unsigned sk
     }
 }
 
-inline void TreeSummary::readTreefile(const string filename, unsigned skip, double scaler)
+inline void TreeSummary::readTreefile(const string filename, unsigned skip, double scaler, bool noscale_first)
     {
     TreeManip tm;
     Split::treeid_t splitset;
@@ -231,7 +231,7 @@ inline void TreeSummary::readTreefile(const string filename, unsigned skip, doub
 
                     // store the newick tree description
                     string newick = d.GetNewick();;
-                    if (scaler == 1.0) {
+                    if (noscale_first || scaler == 1.0) {
                         _newicks.push_back(newick);
                     }
                     else {
