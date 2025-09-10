@@ -26,7 +26,7 @@ namespace op
                                         TreeSummary();
                                         ~TreeSummary();
 
-            string                      scaleEdgeLengths(const string & newick, double scaler);
+            string                      scaleEdgeLengths(const string & newick, bool rooted, double scaler);
             void                        readRevBayesTreefile(const string filename, unsigned skip, double scaler, bool noscale_first);
             void                        readTreefile(const string filename, unsigned skip, double scaler, bool noscale_first);
             //void                        showSummary() const;
@@ -93,9 +93,9 @@ inline void TreeSummary::clear() {
     _newicks.clear();
     }
 
-inline string TreeSummary::scaleEdgeLengths(const string & newick, double scaler) {
+inline string TreeSummary::scaleEdgeLengths(const string & newick, bool rooted, double scaler) {
     TreeManip tm;
-    tm.buildFromNewick(newick, false, true);
+    tm.buildFromNewick(newick, rooted, true);
     tm.scaleAllEdgeLengths(scaler);
     return tm.makeNewick(9);
 }
@@ -138,13 +138,13 @@ inline void TreeSummary::readRevBayesTreefile(const string filename, unsigned sk
             boost::algorithm::split(parts, line, boost::is_any_of("\t"));
             nparts = (unsigned)parts.size();
             assert((is_combined_treefile && nparts == 6) || nparts == 5);
-            _is_rooted.push_back(true);
+            _is_rooted.push_back(true); //TODO: trees may be unrooted, right?
             string & newick = parts[is_combined_treefile ? 5 : 4];
             if (noscale_first || scaler == 1.0) {
                 _newicks.emplace_back(newick);
             }
             else {
-                _newicks.emplace_back(scaleEdgeLengths(newick, scaler));
+                _newicks.emplace_back(scaleEdgeLengths(newick, true, scaler)); //TODO:trees may be unrooted, right?
             }
         }
     }
@@ -235,7 +235,7 @@ inline void TreeSummary::readTreefile(const string filename, unsigned skip, doub
                         _newicks.push_back(newick);
                     }
                     else {
-                        _newicks.push_back(scaleEdgeLengths(newick, scaler));
+                        _newicks.push_back(scaleEdgeLengths(newick, is_rooted, scaler));
                     }
 
                     //unsigned tree_index = (unsigned)_newicks.size() - 1;
