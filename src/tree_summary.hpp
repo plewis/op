@@ -97,7 +97,7 @@ inline string TreeSummary::scaleEdgeLengths(const string & newick, bool rooted, 
     TreeManip tm;
     tm.buildFromNewick(newick, rooted, true);
     tm.scaleAllEdgeLengths(scaler);
-    return tm.makeNewick(9);
+    return tm.makeNewick(9, false);
 }
 
 inline void TreeSummary::readRevBayesTreefile(const string filename, unsigned skip, double scaler, bool noscale_first) {
@@ -129,24 +129,34 @@ inline void TreeSummary::readRevBayesTreefile(const string filename, unsigned sk
     }
 
     TreeManip tm;
-    unsigned nskipped = 0;
+    unsigned t = 0;
     while (getline(buffer, line)) {
-        if (nskipped++ < skip) {
-            ++nskipped;
-        }
-        else {
+        if (t >= skip) {
             boost::algorithm::split(parts, line, boost::is_any_of("\t"));
             nparts = (unsigned)parts.size();
             assert((is_combined_treefile && nparts == 6) || nparts == 5);
             _is_rooted.push_back(true); //TODO: trees may be unrooted, right?
             string & newick = parts[is_combined_treefile ? 5 : 4];
-            if (noscale_first || scaler == 1.0) {
-                _newicks.emplace_back(newick);
-            }
-            else {
+
+            // do_scale    scaler    noscale_first   t > skip
+            //   false       1.0         false        true
+            //   false       1.0         false        false
+            //   false       1.0          true        true
+            //   false       1.0          true        false
+            //    true     not 1.0       false        true
+            //    true     not 1.0       false        false
+            //    true     not 1.0        true        true
+            //   false     not 1.0        true        false
+            bool do_scale = static_cast<bool>((scaler != 1.0) && (!noscale_first || t > skip));
+
+            if (do_scale) {
                 _newicks.emplace_back(scaleEdgeLengths(newick, true, scaler)); //TODO:trees may be unrooted, right?
             }
+            else {
+                _newicks.emplace_back(newick);
+            }
         }
+        t++;
     }
 }
 
@@ -231,11 +241,23 @@ inline void TreeSummary::readTreefile(const string filename, unsigned skip, doub
 
                     // store the newick tree description
                     string newick = d.GetNewick();;
-                    if (noscale_first || scaler == 1.0) {
-                        _newicks.push_back(newick);
+
+                    // do_scale    scaler    noscale_first   t > skip
+                    //   false       1.0         false        true
+                    //   false       1.0         false        false
+                    //   false       1.0          true        true
+                    //   false       1.0          true        false
+                    //    true     not 1.0       false        true
+                    //    true     not 1.0       false        false
+                    //    true     not 1.0        true        true
+                    //   false     not 1.0        true        false
+                    bool do_scale = static_cast<bool>((scaler != 1.0) && (!noscale_first || t > skip));
+
+                    if (do_scale) {
+                        _newicks.push_back(scaleEdgeLengths(newick, is_rooted, scaler));
                     }
                     else {
-                        _newicks.push_back(scaleEdgeLengths(newick, is_rooted, scaler));
+                        _newicks.push_back(newick);
                     }
 
                     //unsigned tree_index = (unsigned)_newicks.size() - 1;

@@ -30,7 +30,7 @@ namespace op {
         void                        scaleAllEdgeLengths(double scaler);
         void                        createTestTree();
 
-        string                      makeNewick(unsigned precision) const;
+        string                      makeNewick(unsigned precision, bool use_names) const;
         void                        buildFromNewick(const string newick, bool rooted, bool allow_polytomies);
         void                        setLeafNames(const vector<string> & leafnames);
         void                        storeSplits(set<Split> & internal_splits, set<Split> & leaf_splits);
@@ -221,9 +221,11 @@ namespace op {
         _tree->_levelorder.push_back(second_leaf);
     }
 
-    inline string TreeManip::makeNewick(unsigned precision) const
+    inline string TreeManip::makeNewick(unsigned precision, bool use_names) const
     {
-        bool use_names = _taxon_names.size() > 0;
+        if (use_names && _taxon_names.size() == 0) {
+            throw Xop("Cannot use taxon names in makeNewick when no taxon names have been saved");
+        }
         string newick;
         const format tip_node_format( str(format("%%d:%%.%df") % precision) );
         const format tip_node_format_using_names( str(format("%%s:%%.%df") % precision) );

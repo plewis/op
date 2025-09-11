@@ -126,9 +126,9 @@ inline OP::OP() :
     _distance_lambda(-1.0),
     _scale_by(1.0),
     _tree_summary(nullptr),
-    _frechet_epsilon(0.001),
-    _frechet_n(5),
-    _frechet_k(100),
+    _frechet_epsilon(0.00001),
+    _frechet_n(10),
+    _frechet_k(1000000),
     _kde_bandwidth(0.0),
     _kde_sigma(0.0),
     _kde_q25(0.0),
@@ -152,9 +152,9 @@ inline void OP::clear() {
     _random_number_seed = 1;
     _skip = 0;
     //_taxon_labels.clear();
-    _frechet_epsilon = 0.001;
-    _frechet_n = 5;
-    _frechet_k = 100;
+    _frechet_epsilon = 0.00001;
+    _frechet_n = 10;
+    _frechet_k = 1000000;
 }
 
 inline void OP::processCommandLineOptions(int argc, const char * argv[]) {
@@ -167,10 +167,10 @@ inline void OP::processCommandLineOptions(int argc, const char * argv[]) {
         ("skip", program_options::value(&_skip), "number of trees to skip in specified treefile (default: 0)")
         ("lambda", program_options::value(&_distance_lambda), "specify a value between 0 and 1 to calculate tree at that point (assumes starting tree is first tree and ending tree is the second tree in the treefile)")
         ("precision", program_options::value(&_precision)->default_value(9), "number of digits precision to use in outputting distances (default: 9)")
-        ("frechet", program_options::value(&_frechet_prefix), "filename prefix for saving Frechet mean tree and variance")
-        ("frechet-epsilon,e", program_options::value(&_frechet_epsilon), "successive Frechet mean approximations must all be this close to stop iterating (default: 0.001)")
-        ("frechet-n,n", program_options::value(&_frechet_n), "number of successive Frechet mean approximations to use for determining whether to stop iterating (default: 5)")
-        ("frechet-k,k", program_options::value(&_frechet_k), "maximum number of Frechet mean iterations (default:100)")
+        ("frechet-prefix", program_options::value(&_frechet_prefix), "filename prefix for saving Frechet mean tree and variance")
+        ("frechet-e,e", program_options::value(&_frechet_epsilon), "successive Frechet mean approximations must all be this close to stop iterating (default: 0.00001)")
+        ("frechet-n,n", program_options::value(&_frechet_n), "number of successive Frechet mean approximations to use for determining whether to stop iterating (default: 10)")
+        ("frechet-k,k", program_options::value(&_frechet_k), "maximum number of Frechet mean iterations (default:1000000)")
         ("gtptest", program_options::value(&_output_for_gtp)->default_value(false), "output treefile that can be read by Owens-Provan GTP program")
         ("quiet,q", program_options::value(&_quiet), "suppress all output except for errors (default: yes)")
         ("seed", program_options::value(&_random_number_seed), "pseudorandom number generator seed (used only when estimating mean tree)")
@@ -215,9 +215,9 @@ inline void OP::processCommandLineOptions(int argc, const char * argv[]) {
     }
 
     // If the user specified --frechet on the command line, set _frechet_mean and _frechet_prefix
-    if (vm.count("frechet") > 0) {
+    if (vm.count("frechet-prefix") > 0) {
         _frechet_mean = true;
-        _frechet_prefix = vm["frechet"].as<string>();
+        _frechet_prefix = vm["frechet-prefix"].as<string>();
     }
 }
 
@@ -1960,13 +1960,13 @@ inline void OP::run() {
             // Save the tree at _distance_lambda from the starting tree toward the ending tree
             string fn = boost::str(format("tree-at-lambda-%.5f.txt") % _distance_lambda);
             ofstream middle_file(fn);
-            middle_file << starttm.makeNewick(9) << endl;
+            middle_file << starttm.makeNewick(9, true) << endl;
             middle_file << "# lambda = " << setprecision(9) << _distance_lambda << endl;
             middle_file.close();
 
             if (!_quiet) {
                 cout << "Tree at lambda = " << setprecision(5) << _distance_lambda << ":" << endl;
-                cout << starttm.makeNewick(9) << endl;
+                cout << starttm.makeNewick(9, true) << endl;
             }
 
             return;
@@ -1998,7 +1998,7 @@ inline void OP::run() {
             // Save the mean tree and variance
             string fn = _frechet_prefix + ".txt";
             ofstream mean_file(fn);
-            mean_file << "# " << mean_tree.makeNewick(9) << endl;
+            mean_file << "# " << mean_tree.makeNewick(9, true) << endl;
             mean_file << boost::str(boost::format("# variance = %.9f\n") % variance);
             mean_file << boost::str(boost::format("# tree length = %.9f\n") % mean_tree.calcTreeLength());
             mean_file << boost::str(boost::format("# iterations = %d\n") % number_of_iterations);
@@ -2019,7 +2019,7 @@ inline void OP::run() {
             if (!_quiet) {
                 cout << boost::str(format("%d iterations required (of %d max. iterations):") % number_of_iterations % _frechet_k) << endl;
                 cout << "Mean tree:" << endl;
-                cout << mean_tree.makeNewick(9) << endl;
+                cout << mean_tree.makeNewick(9, true) << endl;
                 cout << "Variance = " << variance << endl;
                 cout << "Tree length = " << setprecision(9) << mean_tree.calcTreeLength() << endl;
             }
